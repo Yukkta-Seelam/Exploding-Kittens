@@ -11,18 +11,32 @@
 </head>
 <body>
     <div id="app">
-        <!-- Lobby Screen -->
-        <section id="lobby" class="screen active">
+        <!-- Home: Choose Play Mode -->
+        <section id="home" class="screen active">
             <div class="lobby-content">
                 <h1 class="game-title">
                     <span class="title-icon">💥</span>
                     Exploding Kittens
                 </h1>
                 <p class="game-subtitle">Don't draw the Exploding Kitten—or defuse it!</p>
-                
+                <div class="setup-card">
+                    <h2>How do you want to play?</h2>
+                    <button id="play-local-btn" class="btn btn-primary btn-block">Play Locally</button>
+                    <p class="mode-hint">Same device, pass between players</p>
+                    <button id="play-online-btn" class="btn btn-secondary btn-block">Play Online</button>
+                    <p class="mode-hint">Same party code, different devices</p>
+                </div>
+                <p class="rules-link"><a href="#rules" id="show-rules-home">How to Play</a></p>
+            </div>
+        </section>
+
+        <!-- Lobby Screen (local play) -->
+        <section id="lobby" class="screen">
+            <div class="lobby-content">
+                <h1 class="game-title">Exploding Kittens</h1>
+                <p class="game-subtitle">Local game</p>
                 <div class="setup-card">
                     <h2>Game Setup</h2>
-                    
                     <div class="form-group">
                         <label for="game-mode">Game Mode</label>
                         <select id="game-mode">
@@ -30,7 +44,6 @@
                             <option value="party">Party Pack (2–10 players)</option>
                         </select>
                     </div>
-                    
                     <div class="form-group">
                         <label for="player-count">Number of Players</label>
                         <select id="player-count">
@@ -40,17 +53,84 @@
                             <option value="5">5 players</option>
                         </select>
                     </div>
-                    
-                    <div class="player-names" id="player-names">
-                        <!-- Player name inputs populated by JS -->
-                    </div>
-                    
+                    <div class="player-names" id="player-names"></div>
                     <button id="start-btn" class="btn btn-primary">Start Game</button>
                 </div>
-                
-                <p class="rules-link">
-                    <a href="#rules" id="show-rules">How to Play</a>
-                </p>
+                <p class="rules-link"><a href="#rules" id="show-rules">How to Play</a></p>
+            </div>
+        </section>
+
+        <!-- Online: Create or Join -->
+        <section id="online-setup" class="screen">
+            <div class="lobby-content">
+                <h1 class="game-title">Play Online</h1>
+                <p class="game-subtitle">Share the party code with friends</p>
+                <div class="setup-card">
+                    <button id="create-party-btn" class="btn btn-primary btn-block">Create Party</button>
+                    <div class="divider">or</div>
+                    <div class="form-group">
+                        <label for="party-code">Party code</label>
+                        <input type="text" id="party-code" placeholder="e.g. ABC123" maxlength="6" class="input-code">
+                    </div>
+                    <div class="form-group">
+                        <label for="join-name">Your name</label>
+                        <input type="text" id="join-name" placeholder="Your name" maxlength="20">
+                    </div>
+                    <button id="join-party-btn" class="btn btn-secondary btn-block">Join Party</button>
+                </div>
+                <button id="online-back-btn" class="btn btn-ghost">← Back</button>
+            </div>
+        </section>
+
+        <!-- Create Party form -->
+        <section id="create-party-form" class="screen">
+            <div class="lobby-content">
+                <h1 class="game-title">Create Party</h1>
+                <div class="setup-card">
+                    <div class="form-group">
+                        <label for="host-name">Your name</label>
+                        <input type="text" id="host-name" placeholder="Host name" maxlength="20">
+                    </div>
+                    <div class="form-group">
+                        <label for="create-game-mode">Game Mode</label>
+                        <select id="create-game-mode">
+                            <option value="base">Base Game (2–5 players)</option>
+                            <option value="party">Party Pack (2–10 players)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="create-player-count">Max players</label>
+                        <select id="create-player-count">
+                            <option value="2">2</option>
+                            <option value="3">3</option>
+                            <option value="4">4</option>
+                            <option value="5">5</option>
+                            <option value="6">6</option>
+                            <option value="7">7</option>
+                            <option value="8">8</option>
+                            <option value="9">9</option>
+                            <option value="10">10</option>
+                        </select>
+                    </div>
+                    <button id="create-party-submit" class="btn btn-primary">Create & get code</button>
+                </div>
+                <button id="create-back-btn" class="btn btn-ghost">← Back</button>
+            </div>
+        </section>
+
+        <!-- Room Lobby (waiting for players) -->
+        <section id="room-lobby" class="screen">
+            <div class="lobby-content">
+                <h1 class="game-title">Party</h1>
+                <div class="setup-card room-card">
+                    <p class="party-code-label">Party code</p>
+                    <p id="display-party-code" class="party-code"></p>
+                    <p class="copy-hint">Share this code with friends so they can join</p>
+                    <ul id="room-players-list" class="room-players-list"></ul>
+                    <button id="room-start-btn" class="btn btn-primary" disabled>Start Game</button>
+                    <p id="room-start-hint" class="room-hint">Need at least 2 players to start</p>
+                </div>
+                <button id="room-leave-btn" class="btn btn-ghost">Leave party</button>
             </div>
         </section>
 
@@ -135,6 +215,9 @@
         <a href="https://github.com/Yukkta-Seelam/Exploding-Kittens" target="_blank" rel="noopener" class="github-link">View on GitHub</a>
     </footer>
 
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="firebase-config.js"></script>
     <script src="game.js"></script>
 </body>
 </html>

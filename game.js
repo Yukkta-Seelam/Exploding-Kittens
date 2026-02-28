@@ -1,6 +1,6 @@
 /**
  * Exploding Kittens - Web App
- * Pass-and-play mode: players take turns on the same device
+ * Local pass-and-play + Online play with party code (Firebase Firestore)
  */
 
 // Card definitions
@@ -19,6 +19,8 @@ const CARD_TYPES = {
     CAT_RAINICORN: { id: 'cat_rainicorn', name: 'Rain-icorn', type: 'cat', cssClass: 'card-cat', emoji: '🌈', catType: 'rainicorn' },
     CAT_TACO: { id: 'cat_taco', name: 'Taco Cat', type: 'cat', cssClass: 'card-cat', emoji: '🌮', catType: 'taco' },
 };
+const CARDS_BY_ID = {};
+Object.values(CARD_TYPES).forEach(c => { CARDS_BY_ID[c.id] = c; });
 
 // Deck composition: Base (2-5 players) and Party (2-10 players)
 const BASE_DECK = [
@@ -70,6 +72,54 @@ let gameState = {
     gameMode: 'base',
 };
 
+// Online state
+let isOnline = false;
+let myUserId = null;
+let roomCode = null;
+let roomUnsubscribe = null;
+let db = null;
+let myPlayerIndex = 0;
+
+function getMyUserId() {
+    if (myUserId) return myUserId;
+    let id = localStorage.getItem('ek_user_id');
+    if (!id) {
+        id = 'u_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+        localStorage.setItem('ek_user_id', id);
+    }
+    myUserId = id;
+    return id;
+}
+
+// Serialize/deserialize for Firestore (card objects <-> ids)
+function cardToId(card) { return card.id; }
+function idToCard(id) { return CARDS_BY_ID[id] || null; }
+function serializeState() {
+    return {
+        drawPile: gameState.drawPile.map(cardToId),
+        discardPile: gameState.discardPile.map(cardToId),
+        hands: gameState.players.map(p => p.hand.map(cardToId)),
+        currentPlayerIndex: gameState.currentPlayerIndex,
+        attacksPending: gameState.attacksPending || 0,
+        eliminated: gameState.players.map(p => p.eliminated),
+        winnerIndex: gameState.winnerIndex ?? null,
+    };
+}
+function deserializeState(data, playerNames) {
+    if (!data || !data.hands) return;
+    gameState.drawPile = (data.drawPile || []).map(idToCard).filter(Boolean);
+    gameState.discardPile = (data.discardPile || []).map(idToCard).filter(Boolean);
+    gameState.players = (data.hands || []).map(hand => ({
+        hand: hand.map(idToCard).filter(Boolean),
+        eliminated: false,
+    }));
+    data.eliminated?.forEach((el, i) => { if (gameState.players[i]) gameState.players[i].eliminated = el; });
+    gameState.playerNames = playerNames || gameState.playerNames;
+    gameState.currentPlayerIndex = data.currentPlayerIndex ?? 0;
+    gameState.attacksPending = data.attacksPending ?? 0;
+    gameState.winnerIndex = data.winnerIndex ?? null;
+}
+
 // DOM refs
 const lobby = document.getElementById('lobby');
 const gameScreen = document.getElementById('game');
@@ -96,6 +146,27 @@ const rulesModal = document.getElementById('rules-modal');
 const closeRulesBtn = document.getElementById('close-rules');
 const playAgainBtn = document.getElementById('play-again');
 const winnerMessage = document.getElementById('winner-message');
+const homeScreen = document.getElementById('home');
+const playLocalBtn = document.getElementById('play-local-btn');
+const playOnlineBtn = document.getElementById('play-online-btn');
+const onlineSetupScreen = document.getElementById('online-setup');
+const createPartyFormScreen = document.getElementById('create-party-form');
+const roomLobbyScreen = document.getElementById('room-lobby');
+const partyCodeInput = document.getElementById('party-code');
+const joinNameInput = document.getElementById('join-name');
+const joinPartyBtn = document.getElementById('join-party-btn');
+const createPartyBtn = document.getElementById('create-party-btn');
+const onlineBackBtn = document.getElementById('online-back-btn');
+const hostNameInput = document.getElementById('host-name');
+const createGameModeSelect = document.getElementById('create-game-mode');
+const createPlayerCountSelect = document.getElementById('create-player-count');
+const createPartySubmitBtn = document.getElementById('create-party-submit');
+const createBackBtn = document.getElementById('create-back-btn');
+const displayPartyCodeEl = document.getElementById('display-party-code');
+const roomPlayersListEl = document.getElementById('room-players-list');
+const roomStartBtn = document.getElementById('room-start-btn');
+const roomStartHint = document.getElementById('room-start-hint');
+const roomLeaveBtn = document.getElementById('room-leave-btn');
 
 // Player count options based on mode
 function updatePlayerCountOptions() {
@@ -132,6 +203,234 @@ playerCountSelect.addEventListener('change', updatePlayerNameInputs);
 // Initialize
 updatePlayerCountOptions();
 updatePlayerNameInputs();
+
+// Firebase init (optional)
+if (typeof firebase !== 'undefined' && window.firebaseConfig && window.firebaseConfig.apiKey && window.firebaseConfig.apiKey !== 'YOUR_API_KEY') {
+    try {
+        firebase.initializeApp(window.firebaseConfig);
+        db = firebase.firestore();
+    } catch (e) { console.warn('Firebase init failed', e); }
+}
+const hasFirebase = () => db != null;
+
+// Show/hide Play Online
+if (playOnlineBtn) {
+    playOnlineBtn.style.display = hasFirebase() ? 'block' : 'none';
+}
+if (createGameModeSelect && createPlayerCountSelect) {
+    const updateCreatePlayerCount = () => {
+        const max = createGameModeSelect.value === 'party' ? 10 : 5;
+        createPlayerCountSelect.innerHTML = '';
+        for (let i = 2; i <= max; i++) {
+            const opt = document.createElement('option');
+            opt.value = i;
+            opt.textContent = i + ' players';
+            createPlayerCountSelect.appendChild(opt);
+        }
+    };
+    createGameModeSelect.addEventListener('change', updateCreatePlayerCount);
+    updateCreatePlayerCount();
+}
+
+function showScreen(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    const el = document.getElementById(id);
+    if (el) el.classList.add('active');
+}
+
+function generateRoomCode() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code = '';
+    for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+    return code;
+}
+
+async function createRoom() {
+    if (!db) return;
+    const name = (hostNameInput?.value || '').trim() || 'Host';
+    const gameMode = createGameModeSelect?.value || 'base';
+    const maxPlayers = parseInt(createPlayerCountSelect?.value || '5', 10);
+    const uid = getMyUserId();
+    roomCode = generateRoomCode();
+    const roomRef = db.collection('rooms').doc(roomCode);
+    await roomRef.set({
+        hostId: uid,
+        playerIds: [uid],
+        playerNames: [name],
+        status: 'lobby',
+        gameMode,
+        playerCount: maxPlayers,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+    isOnline = true;
+    showScreen('room-lobby');
+    subscribeToRoom();
+}
+
+async function joinRoom() {
+    if (!db) return;
+    const code = (partyCodeInput?.value || '').trim().toUpperCase().replace(/\s/g, '');
+    const name = (joinNameInput?.value || '').trim() || 'Player';
+    if (!code || code.length < 4) {
+        alert('Please enter a valid party code (4–6 characters).');
+        return;
+    }
+    const uid = getMyUserId();
+    const roomRef = db.collection('rooms').doc(code);
+    const doc = await roomRef.get();
+    if (!doc.exists) {
+        alert('No party found with that code. Check the code and try again.');
+        return;
+    }
+    const data = doc.data();
+    if (data.status !== 'lobby') {
+        alert('That game has already started.');
+        return;
+    }
+    if (data.playerIds && data.playerIds.includes(uid)) {
+        roomCode = code;
+        isOnline = true;
+        showScreen('room-lobby');
+        subscribeToRoom();
+        return;
+    }
+    if (data.playerIds && data.playerIds.length >= data.playerCount) {
+        alert('This party is full.');
+        return;
+    }
+    await roomRef.update({
+        playerIds: firebase.firestore.FieldValue.arrayUnion(uid),
+        playerNames: firebase.firestore.FieldValue.arrayUnion(name),
+    });
+    roomCode = code;
+    isOnline = true;
+    showScreen('room-lobby');
+    subscribeToRoom();
+}
+
+function subscribeToRoom() {
+    if (!db || !roomCode) return;
+    if (roomUnsubscribe) roomUnsubscribe();
+    const roomRef = db.collection('rooms').doc(roomCode);
+    roomUnsubscribe = roomRef.onSnapshot(doc => {
+        if (!doc.exists) return;
+        const data = doc.data();
+        if (data.status === 'lobby') {
+            displayPartyCodeEl.textContent = roomCode;
+            roomPlayersListEl.innerHTML = (data.playerNames || []).map((n, i) => `<li>${n}</li>`).join('');
+            const isHost = data.hostId === getMyUserId();
+            roomStartBtn.disabled = !isHost || (data.playerIds || []).length < 2;
+            roomStartHint.textContent = (data.playerIds || []).length < 2 ? 'Need at least 2 players to start' : (isHost ? 'Click Start when everyone has joined' : 'Waiting for host to start');
+        } else if (data.status === 'playing' && data.gameState) {
+            gameState.playerNames = data.playerNames || [];
+            gameState.playerCount = gameState.playerNames.length;
+            myPlayerIndex = (data.playerIds || []).indexOf(getMyUserId());
+            if (myPlayerIndex < 0) myPlayerIndex = 0;
+            deserializeState(data.gameState, gameState.playerNames);
+            if (data.gameState.winnerIndex != null) {
+                showWinner(data.gameState.winnerIndex);
+            } else {
+                showScreen('game');
+                renderGame();
+            }
+        } else if (data.status === 'ended' && data.gameState && data.gameState.winnerIndex != null) {
+            gameState.playerNames = data.playerNames || [];
+            deserializeState(data.gameState, gameState.playerNames);
+            showWinner(data.gameState.winnerIndex);
+        }
+    });
+}
+
+async function startGameOnline() {
+    if (!db || !roomCode) return;
+    const roomRef = db.collection('rooms').doc(roomCode);
+    const doc = await roomRef.get();
+    if (!doc.exists) return;
+    const data = doc.data();
+    if (data.hostId !== getMyUserId() || data.status !== 'lobby') return;
+    const playerNames = data.playerNames || [];
+    const playerCount = playerNames.length;
+    if (playerCount < 2) return;
+    const mode = data.gameMode || 'base';
+    gameState = {
+        players: [],
+        playerNames: playerNames,
+        drawPile: [],
+        discardPile: [],
+        currentPlayerIndex: 0,
+        direction: 1,
+        attacksPending: 0,
+        playerCount,
+        gameMode: mode,
+    };
+    let deck = mode === 'party' ? createPartyDeck(playerCount) : [...BASE_DECK];
+    deck = deck.filter(c => c.id !== 'exploding' && c.id !== 'defuse');
+    for (let i = 0; i < playerCount; i++) {
+        gameState.players.push({ hand: [CARD_TYPES.DEFUSE], eliminated: false });
+    }
+    const cardsPerPlayer = 7;
+    for (let i = 0; i < playerCount; i++) {
+        for (let j = 1; j < cardsPerPlayer; j++) {
+            if (deck.length > 0) {
+                const idx = Math.floor(Math.random() * deck.length);
+                gameState.players[i].hand.push(deck.splice(idx, 1)[0]);
+            }
+        }
+    }
+    const defuseCount = Math.min(6, playerCount + 2);
+    const defusesForDeck = mode === 'party' ? Math.min(10, defuseCount - playerCount) : (playerCount >= 4 ? 4 : 2);
+    for (let i = 0; i < defusesForDeck && deck.length > 0; i++) {
+        const idx = Math.floor(Math.random() * deck.length);
+        deck.splice(idx, 0, CARD_TYPES.DEFUSE);
+    }
+    const explodingCount = playerCount - 1;
+    for (let i = 0; i < explodingCount; i++) deck.push(CARD_TYPES.EXPLODING);
+    gameState.drawPile = shuffle(deck);
+    await roomRef.update({
+        status: 'playing',
+        gameState: serializeState(),
+    });
+    showScreen('game');
+    renderGame();
+}
+
+async function updateGameStateOnline(state) {
+    if (!db || !roomCode) return;
+    await db.collection('rooms').doc(roomCode).update({
+        gameState: state,
+        lastUpdated: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+}
+
+function leaveRoom() {
+    if (roomUnsubscribe) {
+        roomUnsubscribe();
+        roomUnsubscribe = null;
+    }
+    if (db && roomCode) {
+        const roomRef = db.collection('rooms').doc(roomCode);
+        roomRef.get().then(doc => {
+            if (!doc.exists) return;
+            const data = doc.data();
+            const uid = getMyUserId();
+            const ids = data.playerIds || [];
+            const names = data.playerNames || [];
+            const idx = ids.indexOf(uid);
+            if (idx >= 0) {
+                ids.splice(idx, 1);
+                names.splice(idx, 1);
+                const updates = { playerIds: ids, playerNames: names };
+                if (data.hostId === uid && ids.length > 0) updates.hostId = ids[0];
+                if (ids.length === 0) roomRef.delete();
+                else roomRef.update(updates);
+            }
+        });
+    }
+    roomCode = null;
+    isOnline = false;
+    showScreen('home');
+}
+
 
 // Create card element
 function createCardElement(card, index, playable = false) {
@@ -219,6 +518,7 @@ function renderGame() {
     pileCountEl.textContent = gameState.drawPile.length;
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
     const name = gameState.playerNames[gameState.currentPlayerIndex];
+    const isMyTurn = !isOnline || (myPlayerIndex === gameState.currentPlayerIndex);
 
     turnIndicatorEl.textContent = `${name}'s Turn`;
     currentPlayerLabel.textContent = `${name}'s Hand`;
@@ -239,10 +539,11 @@ function renderGame() {
         playersAreaEl.appendChild(opp);
     }
 
-    // Current player hand
+    // Current player hand (only playable when it's your turn in online mode)
     handEl.innerHTML = '';
     currentPlayer.hand.forEach((card, idx) => {
-        const playable = canPlayCard(card, idx);
+        let playable = canPlayCard(card, idx);
+        if (isOnline) playable = playable && isMyTurn && !currentPlayer.eliminated;
         const el = createCardElement(card, idx, playable);
         if (playable) {
             el.addEventListener('click', () => playCard(idx));
@@ -250,7 +551,7 @@ function renderGame() {
         handEl.appendChild(el);
     });
 
-    drawBtn.disabled = false;
+    drawBtn.disabled = !isMyTurn || currentPlayer.eliminated;
 }
 
 function canPlayCard(card, index) {
@@ -302,6 +603,7 @@ function playCard(index) {
             advanceTurn();
         }
         renderGame();
+        syncStateIfOnline();
         return;
     }
 
@@ -311,6 +613,7 @@ function playCard(index) {
         gameState.attacksPending = (gameState.attacksPending || 0) + 2;
         advanceTurn();
         renderGame();
+        syncStateIfOnline();
         return;
     }
 
@@ -321,6 +624,7 @@ function playCard(index) {
         const html = top3.map(c => `<div class="card ${c.cssClass}">${c.emoji} ${c.name}</div>`).join('');
         showModal('See the Future', html);
         renderGame();
+        syncStateIfOnline();
         return;
     }
 
@@ -330,6 +634,7 @@ function playCard(index) {
         gameState.drawPile = shuffle(gameState.drawPile);
         advanceTurn();
         renderGame();
+        syncStateIfOnline();
         return;
     }
 
@@ -344,6 +649,8 @@ function playCard(index) {
             player.hand.splice(index, 1);
             gameState.discardPile.push(card);
             advanceTurn();
+            renderGame();
+            syncStateIfOnline();
         } else {
             const html = targets.map(t => `<button class="btn" data-target="${t.index}">${t.name}</button>`).join('');
             showModal('Choose player to take a card from', html, () => {});
@@ -359,6 +666,7 @@ function playCard(index) {
                     modalOverlay.classList.add('hidden');
                     advanceTurn();
                     renderGame();
+                    syncStateIfOnline();
                 };
             });
         }
@@ -367,11 +675,11 @@ function playCard(index) {
     }
 
     if (card.id === 'nope') {
-        // Nope is typically played in response - for simplicity we allow playing it to discard (house rule: can discard nope)
         player.hand.splice(index, 1);
         gameState.discardPile.push(card);
         advanceTurn();
         renderGame();
+        syncStateIfOnline();
         return;
     }
 }
@@ -402,7 +710,7 @@ function playCatCombo(count, index) {
             const taken = targetHand.splice(cardIdx, 1)[0];
             player.hand.push(taken);
         }
-        // Pair: take card and turn continues (can play more or draw)
+        syncStateIfOnline();
     } else {
         showModal('Request a specific card', '<p>Pick a player to request a card from (simplified: random card taken)</p>', () => {});
         const targets = [];
@@ -434,6 +742,7 @@ function playCatCombo(count, index) {
         }
     }
     renderGame();
+    syncStateIfOnline();
 }
 
 function advanceTurn() {
@@ -474,6 +783,7 @@ function drawCard() {
             const alive = gameState.players.filter(p => !p.eliminated);
             if (alive.length === 1) {
                 const winnerIdx = gameState.players.findIndex(p => !p.eliminated);
+                gameState.winnerIndex = winnerIdx;
                 showWinner(winnerIdx);
                 return;
             }
@@ -485,12 +795,26 @@ function drawCard() {
     }
     drawBtn.disabled = false;
     renderGame();
+    syncStateIfOnline();
 }
 
 function showWinner(winnerIndex) {
+    gameState.winnerIndex = winnerIndex;
+    if (isOnline && db && roomCode) {
+        db.collection('rooms').doc(roomCode).update({
+            status: 'ended',
+            gameState: serializeState(),
+        }).catch(() => {});
+    }
     gameScreen.classList.remove('active');
     winnerScreen.classList.add('active');
     winnerMessage.textContent = `${gameState.playerNames[winnerIndex]} Wins! 🎉`;
+}
+
+function syncStateIfOnline() {
+    if (isOnline && db && roomCode) {
+        updateGameStateOnline(serializeState()).catch(() => {});
+    }
 }
 
 // Event listeners
@@ -499,7 +823,12 @@ startBtn.addEventListener('click', setupGame);
 backBtn.addEventListener('click', () => {
     gameScreen.classList.remove('active');
     winnerScreen.classList.remove('active');
-    lobby.classList.add('active');
+    if (isOnline) {
+        showScreen('room-lobby');
+    } else {
+        lobby.classList.add('active');
+        showScreen('lobby');
+    }
 });
 
 drawPileEl.addEventListener('click', () => {
@@ -512,6 +841,12 @@ showRulesBtn.addEventListener('click', (e) => {
     e.preventDefault();
     rulesModal.classList.remove('hidden');
 });
+if (document.getElementById('show-rules-home')) {
+    document.getElementById('show-rules-home').addEventListener('click', (e) => {
+        e.preventDefault();
+        rulesModal.classList.remove('hidden');
+    });
+}
 
 closeRulesBtn.addEventListener('click', () => {
     rulesModal.classList.add('hidden');
@@ -519,5 +854,21 @@ closeRulesBtn.addEventListener('click', () => {
 
 playAgainBtn.addEventListener('click', () => {
     winnerScreen.classList.remove('active');
-    lobby.classList.add('active');
+    if (isOnline) {
+        leaveRoom();
+    } else {
+        lobby.classList.add('active');
+        showScreen('lobby');
+    }
 });
+
+// Home & online flow
+if (playLocalBtn) playLocalBtn.addEventListener('click', () => showScreen('lobby'));
+if (playOnlineBtn) playOnlineBtn.addEventListener('click', () => showScreen('online-setup'));
+if (createPartyBtn) createPartyBtn.addEventListener('click', () => showScreen('create-party-form'));
+if (onlineBackBtn) onlineBackBtn.addEventListener('click', () => showScreen('home'));
+if (createBackBtn) createBackBtn.addEventListener('click', () => showScreen('online-setup'));
+if (createPartySubmitBtn) createPartySubmitBtn.addEventListener('click', () => createRoom());
+if (joinPartyBtn) joinPartyBtn.addEventListener('click', () => joinRoom());
+if (roomStartBtn) roomStartBtn.addEventListener('click', () => startGameOnline());
+if (roomLeaveBtn) roomLeaveBtn.addEventListener('click', () => leaveRoom());
