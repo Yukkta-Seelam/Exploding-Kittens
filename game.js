@@ -213,10 +213,8 @@ if (typeof firebase !== 'undefined' && window.firebaseConfig && window.firebaseC
 }
 const hasFirebase = () => db != null;
 
-// Show/hide Play Online
-if (playOnlineBtn) {
-    playOnlineBtn.style.display = hasFirebase() ? 'block' : 'none';
-}
+const FIREBASE_SETUP_MSG = 'Online play needs Firebase. In this repo, add your Firebase config to firebase-config.js (see README or firebase-config.example.js). Then redeploy.';
+
 if (createGameModeSelect && createPlayerCountSelect) {
     const updateCreatePlayerCount = () => {
         const max = createGameModeSelect.value === 'party' ? 10 : 5;
@@ -246,7 +244,10 @@ function generateRoomCode() {
 }
 
 async function createRoom() {
-    if (!db) return;
+    if (!db) {
+        alert(FIREBASE_SETUP_MSG);
+        return;
+    }
     const name = (hostNameInput?.value || '').trim() || 'Host';
     const gameMode = createGameModeSelect?.value || 'base';
     const maxPlayers = parseInt(createPlayerCountSelect?.value || '5', 10);
@@ -268,7 +269,10 @@ async function createRoom() {
 }
 
 async function joinRoom() {
-    if (!db) return;
+    if (!db) {
+        alert(FIREBASE_SETUP_MSG);
+        return;
+    }
     const code = (partyCodeInput?.value || '').trim().toUpperCase().replace(/\s/g, '');
     const name = (joinNameInput?.value || '').trim() || 'Player';
     if (!code || code.length < 4) {
