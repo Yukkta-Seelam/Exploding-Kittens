@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exploding Kittens - Play with Friends</title>
+    <link rel="stylesheet" href="game.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="app">
+        <!-- Lobby Screen -->
+        <section id="lobby" class="screen active">
+            <div class="lobby-content">
+                <h1 class="game-title">
+                    <span class="title-icon">💥</span>
+                    Exploding Kittens
+                </h1>
+                <p class="game-subtitle">Don't draw the Exploding Kitten—or defuse it!</p>
+                
+                <div class="setup-card">
+                    <h2>Game Setup</h2>
+                    
+                    <div class="form-group">
+                        <label for="game-mode">Game Mode</label>
+                        <select id="game-mode">
+                            <option value="base">Base Game (2–5 players)</option>
+                            <option value="party">Party Pack (2–10 players)</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="player-count">Number of Players</label>
+                        <select id="player-count">
+                            <option value="2">2 players</option>
+                            <option value="3">3 players</option>
+                            <option value="4">4 players</option>
+                            <option value="5">5 players</option>
+                        </select>
+                    </div>
+                    
+                    <div class="player-names" id="player-names">
+                        <!-- Player name inputs populated by JS -->
+                    </div>
+                    
+                    <button id="start-btn" class="btn btn-primary">Start Game</button>
+                </div>
+                
+                <p class="rules-link">
+                    <a href="#rules" id="show-rules">How to Play</a>
+                </p>
+            </div>
+        </section>
+
+        <!-- Game Screen -->
+        <section id="game" class="screen">
+            <header class="game-header">
+                <button id="back-btn" class="btn-icon" title="Back to lobby">←</button>
+                <h2>Exploding Kittens</h2>
+                <div class="turn-indicator" id="turn-indicator">Player 1's Turn</div>
+            </header>
+            
+            <div class="game-board">
+                <div class="players-area" id="players-area">
+                    <!-- Opponent hands rendered by JS -->
+                </div>
+                
+                <div class="center-area">
+                    <div class="draw-pile" id="draw-pile">
+                        <div class="card card-back" id="draw-card">
+                            <span>Draw</span>
+                            <span class="pile-count" id="pile-count">0</span>
+                        </div>
+                    </div>
+                    <div class="discard-pile" id="discard-pile"></div>
+                </div>
+                
+                <div class="current-player-area">
+                    <h3 id="current-player-label">Your Hand</h3>
+                    <div class="hand" id="hand">
+                        <!-- Cards rendered by JS -->
+                    </div>
+                    <button id="draw-btn" class="btn btn-draw">Draw a Card</button>
+                </div>
+            </div>
+            
+            <div id="modal-overlay" class="modal-overlay hidden">
+                <div class="modal" id="modal">
+                    <h3 id="modal-title">Modal</h3>
+                    <div id="modal-content"></div>
+                    <button id="modal-close" class="btn">Close</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Rules Modal -->
+        <section id="rules-modal" class="modal-overlay hidden">
+            <div class="modal rules-modal">
+                <h2>How to Play Exploding Kittens</h2>
+                <div class="rules-content">
+                    <p><strong>Goal:</strong> Be the last player standing! Avoid drawing an Exploding Kitten.</p>
+                    <p><strong>On your turn:</strong> Play any cards you want (or none), then draw a card to end your turn.</p>
+                    <h4>Card Types</h4>
+                    <ul>
+                        <li><strong>Exploding Kitten</strong> — If you draw this without a Defuse, you're out!</li>
+                        <li><strong>Defuse</strong> — Use when you draw an Exploding Kitten to survive. Place the Kitten back anywhere in the deck.</li>
+                        <li><strong>Skip</strong> — End your turn without drawing.</li>
+                        <li><strong>Attack</strong> — End your turn; next player draws 2 cards (can stack!).</li>
+                        <li><strong>See the Future</strong> — Peek at the top 3 cards of the deck.</li>
+                        <li><strong>Shuffle</strong> — Shuffle the draw pile.</li>
+                        <li><strong>Nope</strong> — Cancel any action (except Exploding Kitten).</li>
+                        <li><strong>Favor</strong> — Force a player to give you a card of their choice.</li>
+                        <li><strong>Cat Cards</strong> — Play 2 matching cats to steal a random card; 3 matching to request a specific card.</li>
+                    </ul>
+                    <p><strong>5 Unique Cards:</strong> Play 5 different cards to take any card from the discard pile.</p>
+                </div>
+                <button id="close-rules" class="btn">Got it!</button>
+            </div>
+        </section>
+
+        <!-- Winner Screen -->
+        <section id="winner" class="screen">
+            <div class="winner-content">
+                <h1 id="winner-message">Player 1 Wins! 🎉</h1>
+                <p class="winner-subtitle">They avoided all the Exploding Kittens!</p>
+                <button id="play-again" class="btn btn-primary">Play Again</button>
+            </div>
+        </section>
+    </div>
+
+    <footer class="footer">
+        <a href="https://yukkta-seelam.github.io/Website-new/" class="back-link">← Back to Portfolio</a>
+        <a href="https://github.com/Yukkta-Seelam/Exploding-Kittens" target="_blank" rel="noopener" class="github-link">View on GitHub</a>
+    </footer>
+
+    <script src="game.js"></script>
+</body>
+</html>
