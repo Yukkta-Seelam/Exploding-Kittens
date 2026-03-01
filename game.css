@@ -399,6 +399,23 @@ body {
     font-size: 0.8rem;
 }
 
+.discard-cards .card.clickable {
+    cursor: pointer;
+    border-color: var(--kitten-pink);
+    box-shadow: 0 0 0 2px var(--kitten-pink);
+}
+
+.discard-cards .card.clickable:hover {
+    transform: scale(1.05);
+}
+
+.card-name-small {
+    display: block;
+    font-size: 0.5rem;
+    margin-top: 0.2rem;
+    line-height: 1.1;
+}
+
 .current-player-area {
     margin-top: 2rem;
     padding-top: 1.5rem;

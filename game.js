@@ -22,6 +22,9 @@ const CARD_TYPES = {
 const CARDS_BY_ID = {};
 Object.values(CARD_TYPES).forEach(c => { CARDS_BY_ID[c.id] = c; });
 
+// Cards that can be requested by name when playing 3 of the same cat (all except Exploding)
+const REQUESTABLE_CARDS = Object.values(CARD_TYPES).filter(c => c.id !== 'exploding');
+
 // Deck composition: Base (2-5 players) and Party (2-10 players)
 const BASE_DECK = [
     ...Array(4).fill(CARD_TYPES.EXPLODING),
@@ -70,6 +73,7 @@ let gameState = {
     attacksPending: 0,
     playerCount: 2,
     gameMode: 'base',
+    pendingNope: null, // { actingPlayerIndex, effectType, cardName, emoji, parity } when waiting for Nopes (local + online)
 };
 
 // Online state (Supabase)
@@ -83,6 +87,7 @@ let myPlayerIndex = 0;
 // Play flow: select → confirm
 let pendingCards = [];
 let catStealMode = null;
+let pickFromDiscardMode = null;
 
 function getMyUserId() {
     if (myUserId) return myUserId;
@@ -107,6 +112,7 @@ function serializeState() {
         attacksPending: gameState.attacksPending || 0,
         eliminated: gameState.players.map(p => p.eliminated),
         winnerIndex: gameState.winnerIndex ?? null,
+        pendingNope: gameState.pendingNope,
     };
 }
 function deserializeState(data, playerNames) {
@@ -122,6 +128,7 @@ function deserializeState(data, playerNames) {
     gameState.currentPlayerIndex = data.currentPlayerIndex ?? 0;
     gameState.attacksPending = data.attacksPending ?? 0;
     gameState.winnerIndex = data.winnerIndex ?? null;
+    gameState.pendingNope = data.pendingNope ?? null;
 }
 
 // DOM refs
@@ -459,6 +466,7 @@ async function startGameOnline() {
         attacksPending: 0,
         playerCount,
         gameMode: mode,
+        pendingNope: null,
     };
     let deck = mode === 'party' ? createPartyDeck(playerCount) : [...BASE_DECK];
     deck = deck.filter(c => c.id !== 'exploding' && c.id !== 'defuse');
@@ -491,6 +499,7 @@ async function startGameOnline() {
     if (updateErr) return;
     pendingCards = [];
     catStealMode = null;
+    pickFromDiscardMode = null;
     showScreen('game');
     renderGame();
 }
@@ -559,6 +568,7 @@ function setupGame() {
         attacksPending: 0,
         playerCount,
         gameMode: mode,
+        pendingNope: null,
     };
 
     // Build deck
@@ -601,6 +611,7 @@ function setupGame() {
     gameState.drawPile = shuffle(deck);
     pendingCards = [];
     catStealMode = null;
+    pickFromDiscardMode = null;
     renderGame();
     lobby.classList.remove('active');
     gameScreen.classList.add('active');
@@ -635,9 +646,11 @@ function renderGame() {
     if (isOnline && !isMyTurn) {
         pendingCards = [];
         catStealMode = null;
+        pickFromDiscardMode = null;
     }
 
-    // Opponents: everyone whose hand we're NOT showing (hide their cards - show ? only)
+    const inPickFromDiscard = pickFromDiscardMode && isMyTurn && handToShowIndex === gameState.currentPlayerIndex;
+
     // In catStealMode, ALL opponent cards are clickable to pick which card to take
     const inCatSteal = catStealMode && isMyTurn && handToShowIndex === gameState.currentPlayerIndex;
     playersAreaEl.innerHTML = '';
@@ -677,26 +690,35 @@ function renderGame() {
         });
     }
 
-    // Discard area: show last played cards (visible to all)
+    // Discard area: show last played cards (visible to all). When picking from discard (5-cat), cards are clickable.
     if (discardCardsEl) {
         discardCardsEl.innerHTML = '';
-        const lastPlayed = gameState.discardPile.slice(-5);
-        lastPlayed.forEach(card => {
+        const dp = gameState.discardPile;
+        const start = inPickFromDiscard ? 0 : Math.max(0, dp.length - 8);
+        const slice = dp.slice(start);
+        slice.forEach((card, i) => {
+            const actualIndex = start + i;
             const el = document.createElement('div');
-            el.className = `card ${card.cssClass} card-small`;
-            el.innerHTML = `<span>${card.emoji}</span>`;
+            el.className = `card ${card.cssClass} card-small ${inPickFromDiscard ? 'clickable' : ''}`;
+            el.innerHTML = `<span>${card.emoji}</span><span class="card-name-small">${card.name}</span>`;
+            if (inPickFromDiscard) {
+                el.dataset.discardIndex = actualIndex;
+                el.addEventListener('click', () => onPickFromDiscardClick(actualIndex));
+            }
             discardCardsEl.appendChild(el);
         });
     }
 
     // Confirm / Cancel visibility
-    const hasValidPending = pendingCards.length > 0 && !inCatSteal;
+    const hasValidPending = pendingCards.length > 0 && !inCatSteal && !inPickFromDiscard;
     if (confirmPlayBtn) confirmPlayBtn.style.display = hasValidPending ? 'inline-block' : 'none';
     if (cancelPlayBtn) cancelPlayBtn.style.display = hasValidPending ? 'inline-block' : 'none';
 
-    // Cat steal hint
+    // Cat steal / pick from discard hints
     if (inCatSteal && turnIndicatorEl) {
         turnIndicatorEl.textContent = 'Click a card to take from an opponent';
+    } else if (inPickFromDiscard && turnIndicatorEl) {
+        turnIndicatorEl.textContent = 'Click a card in the discard pile to take it';
     }
 
     // Show hand (only playable when it's your turn in online mode)
@@ -705,7 +727,7 @@ function renderGame() {
         const inPending = pendingCards.includes(idx);
         let playable = canPlayCard(card, idx) && !inPending;
         if (isOnline) playable = playable && isMyTurn && !myHand.eliminated;
-        if (inCatSteal) playable = false;
+        if (inCatSteal || inPickFromDiscard) playable = false;
         const el = createCardElement(card, idx, playable);
         if (playable) {
             el.addEventListener('click', () => selectCard(idx));
@@ -713,24 +735,45 @@ function renderGame() {
         handEl.appendChild(el);
     });
 
-    drawBtn.disabled = !isMyTurn || myHand.eliminated || inCatSteal;
+    drawBtn.disabled = !isMyTurn || myHand.eliminated || inCatSteal || inPickFromDiscard;
+
+    if (gameState.pendingNope) showNopeModalFromState();
 }
 
 function canPlayCard(card, index) {
     if (card.type === 'exploding') return false;
     if (card.id === 'defuse') return false; // Only used when drawing exploding
+    if (card.id === 'nope') return false; // Played reactively via Nope flow
     if (card.type === 'action') return true;
     if (card.type === 'cat') {
         const hand = gameState.players[gameState.currentPlayerIndex].hand;
         const sameCats = hand.filter(c => c.type === 'cat' && c.catType === card.catType);
-        return sameCats.length >= 2;
+        if (sameCats.length >= 2) return true; // 2 or 3 of same
+        // 5 different cats
+        const catTypes = new Set(hand.filter(c => c.type === 'cat').map(c => c.catType));
+        return catTypes.size >= 5;
     }
     return false;
 }
 
+function getPendingCatTypes(hand) {
+    return pendingCards.map(i => hand[i]).filter(c => c && c.type === 'cat').map(c => c.catType);
+}
+
+function isPendingThreeSame(hand) {
+    if (pendingCards.length !== 3) return false;
+    const types = getPendingCatTypes(hand);
+    return types.length === 3 && new Set(types).size === 1;
+}
+
+function isPendingFiveDifferent(hand) {
+    if (pendingCards.length !== 5) return false;
+    const types = getPendingCatTypes(hand);
+    return new Set(types).size === 5;
+}
+
 function selectCard(idx) {
-    const handToShowIndex = isOnline ? myPlayerIndex : gameState.currentPlayerIndex;
-    const hand = gameState.players[handToShowIndex]?.hand || [];
+    const hand = gameState.players[gameState.currentPlayerIndex]?.hand || [];
     const card = hand[idx];
     if (!card || !canPlayCard(card, idx)) return;
 
@@ -738,18 +781,38 @@ function selectCard(idx) {
         pendingCards = [idx];
     } else if (card.type === 'cat') {
         const sameTypeIndices = hand.map((c, i) => (c.type === 'cat' && c.catType === card.catType) ? i : -1).filter(i => i >= 0);
+        const pendingTypes = getPendingCatTypes(hand);
+        const pendingSet = new Set(pendingTypes);
+
         if (pendingCards.length === 0) {
             pendingCards = [idx];
+        } else if (isPendingThreeSame(hand) || isPendingFiveDifferent(hand)) {
+            return;
         } else if (pendingCards.length === 1) {
-            const firstCard = hand[pendingCards[0]];
-            if (firstCard.type === 'cat' && firstCard.catType === card.catType) {
+            if (hand[pendingCards[0]].catType === card.catType) {
+                pendingCards = sameTypeIndices.length >= 2 ? sameTypeIndices.slice(0, 2) : [pendingCards[0], idx];
+            } else {
                 pendingCards = [pendingCards[0], idx];
+            }
+        } else if (pendingCards.length === 2 && pendingSet.size === 1) {
+            if (card.catType === pendingTypes[0] && sameTypeIndices.length >= 3) {
+                pendingCards = sameTypeIndices.slice(0, 3);
+            } else if (card.catType !== pendingTypes[0]) {
+                pendingCards = [pendingCards[0], pendingCards[1], idx];
+            }
+        } else if (pendingCards.length === 2 && pendingSet.size === 2) {
+            if (card.catType === hand[pendingCards[0]].catType && sameTypeIndices.length >= 3) {
+                pendingCards = sameTypeIndices.slice(0, 3);
+            } else if (!pendingSet.has(card.catType)) {
+                pendingCards = [pendingCards[0], pendingCards[1], idx];
             } else {
                 pendingCards = [idx];
             }
-        } else if (pendingCards.length === 2) {
-            const firstCard = hand[pendingCards[0]];
-            if (firstCard.type === 'cat' && firstCard.catType === card.catType) return;
+        } else if (pendingCards.length >= 3 && pendingCards.length < 5 && pendingSet.size === pendingCards.length) {
+            if (!pendingSet.has(card.catType)) {
+                pendingCards = [...pendingCards, idx];
+            }
+        } else {
             pendingCards = [idx];
         }
     }
@@ -768,17 +831,19 @@ function cancelPlay() {
 
 function confirmPlay() {
     if (pendingCards.length === 0) return;
-    const handToShowIndex = isOnline ? myPlayerIndex : gameState.currentPlayerIndex;
-    const hand = gameState.players[handToShowIndex]?.hand || [];
+    const hand = gameState.players[gameState.currentPlayerIndex]?.hand || [];
     const cards = pendingCards.map(i => hand[i]).filter(Boolean);
     if (cards.length === 0) return;
 
     const card = cards[0];
     if (card.type === 'cat') {
-        if (cards.length === 2) {
-            executeCatCombo(2);
-        } else if (cards.length >= 3) {
+        const hand = gameState.players[gameState.currentPlayerIndex]?.hand || [];
+        if (isPendingThreeSame(hand)) {
             executeCatCombo(3);
+        } else if (isPendingFiveDifferent(hand)) {
+            executeCatCombo(5);
+        } else if (cards.length === 2) {
+            executeCatCombo(2);
         }
     } else {
         executeActionCard(pendingCards[0]);
@@ -797,6 +862,312 @@ function onCatStealCardClick(targetPlayerIndex, cardIndex) {
     advanceTurn();
     renderGame();
     syncStateIfOnline();
+}
+
+function onPickFromDiscardClick(discardIndex) {
+    if (!pickFromDiscardMode) return;
+    const dp = gameState.discardPile;
+    if (discardIndex < 0 || discardIndex >= dp.length) return;
+    const card = dp.splice(discardIndex, 1)[0];
+    gameState.players[gameState.currentPlayerIndex].hand.push(card);
+    pickFromDiscardMode = null;
+    advanceTurn();
+    renderGame();
+    syncStateIfOnline();
+}
+
+// Unified Nope flow (local + online): state-driven so all clients see the same window.
+function getNopeHolders() {
+    const out = [];
+    for (let i = 0; i < gameState.playerCount; i++) {
+        if (gameState.players[i].eliminated) continue;
+        if (gameState.players[i].hand.some(c => c.id === 'nope')) {
+            out.push({ index: i, name: gameState.playerNames[i] });
+        }
+    }
+    return out;
+}
+
+function playNopeFromState(playerIndex) {
+    if (!gameState.pendingNope) return;
+    const hand = gameState.players[playerIndex].hand;
+    const nopeIdx = hand.findIndex(c => c.id === 'nope');
+    if (nopeIdx < 0) return;
+    const nopeCard = hand.splice(nopeIdx, 1)[0];
+    gameState.discardPile.push(nopeCard);
+    gameState.pendingNope.parity = (gameState.pendingNope.parity || 0) + 1;
+    syncStateIfOnline();
+    renderGame();
+}
+
+function resolvePendingNope() {
+    if (!gameState.pendingNope) return;
+    modalOverlay.classList.add('hidden');
+    const p = gameState.pendingNope;
+    const cancelled = (p.parity || 0) % 2 === 1;
+    gameState.pendingNope = null;
+    if (cancelled) {
+        advanceTurn();
+    } else {
+        runPendingEffect(p);
+    }
+    syncStateIfOnline();
+    renderGame();
+}
+
+function runPendingEffect(p) {
+    const acting = p.actingPlayerIndex;
+    if (p.effectType === 'skip') {
+        if (gameState.attacksPending > 0) {
+            gameState.attacksPending--;
+            if (gameState.attacksPending === 0) advanceTurn();
+        } else advanceTurn();
+    } else if (p.effectType === 'attack') {
+        gameState.attacksPending = (gameState.attacksPending || 0) + 2;
+        advanceTurn();
+    } else if (p.effectType === 'see_future') {
+        const top3 = gameState.drawPile.slice(0, 3);
+        const html = top3.map(c => `<div class="card ${c.cssClass}">${c.emoji} ${c.name}</div>`).join('');
+        showModal('See the Future', html);
+    } else if (p.effectType === 'shuffle') {
+        gameState.drawPile = shuffle(gameState.drawPile);
+        advanceTurn();
+    } else if (p.effectType === 'favor') {
+        const targets = [];
+        for (let i = 0; i < gameState.playerCount; i++) {
+            if (i !== acting && !gameState.players[i].eliminated && gameState.players[i].hand.length > 0) {
+                targets.push({ index: i, name: gameState.playerNames[i] });
+            }
+        }
+        if (targets.length === 0) {
+            advanceTurn();
+        } else {
+            const html = targets.map(t => `<button class="btn" data-target="${t.index}">${t.name}</button>`).join('');
+            showModal('Choose player to take a card from', html, () => {});
+            const player = gameState.players[acting];
+            modalContent.querySelectorAll('button').forEach(btn => {
+                btn.onclick = () => {
+                    const targetIdx = parseInt(btn.dataset.target, 10);
+                    const targetHand = gameState.players[targetIdx].hand;
+                    const cardIdx = Math.floor(Math.random() * targetHand.length);
+                    const taken = targetHand.splice(cardIdx, 1)[0];
+                    player.hand.push(taken);
+                    modalOverlay.classList.add('hidden');
+                    advanceTurn();
+                    renderGame();
+                    syncStateIfOnline();
+                };
+            });
+        }
+    } else if (p.effectType === '3cat') {
+        run3CatRequestFlow(p.actingPlayerIndex);
+    } else if (p.effectType === '5cat') {
+        run5CatPickFromDiscardFlow(p.actingPlayerIndex);
+    }
+}
+
+function run3CatRequestFlow(actingPlayerIndex) {
+    const targets = [];
+    for (let i = 0; i < gameState.playerCount; i++) {
+        if (i !== actingPlayerIndex && !gameState.players[i].eliminated) {
+            targets.push({ index: i, name: gameState.playerNames[i] });
+        }
+    }
+    if (targets.length === 0) {
+        advanceTurn();
+        renderGame();
+        syncStateIfOnline();
+        return;
+    }
+    const html = '<p>Pick a player to request a card from:</p>' +
+        targets.map(t => `<button class="btn" data-target="${t.index}">${t.name}</button>`).join('');
+    showModal('3 Same Cats – Pick a player', html, () => {});
+    modalContent.querySelectorAll('[data-target]').forEach(btn => {
+        btn.onclick = () => {
+            const targetIdx = parseInt(btn.dataset.target, 10);
+            modalOverlay.classList.add('hidden');
+            const cardOptions = REQUESTABLE_CARDS.map(c => ({ id: c.id, name: c.name, emoji: c.emoji }));
+            const optionsHtml = '<p>Which card do you want to request?</p>' +
+                cardOptions.map(c => `<button class="btn" data-card-id="${c.id}">${c.emoji} ${c.name}</button>`).join('');
+            showModal('Request a card by name', optionsHtml, () => {});
+            modalContent.querySelectorAll('[data-card-id]').forEach(optBtn => {
+                optBtn.onclick = () => {
+                    const requestedId = optBtn.dataset.cardId;
+                    const targetHand = gameState.players[targetIdx].hand;
+                    const hasCard = targetHand.some(c => c.id === requestedId);
+                    modalOverlay.classList.add('hidden');
+                    if (!hasCard) {
+                        showModal('3 cats wasted', `<p>${gameState.playerNames[targetIdx]} doesn't have that card. Nothing happens.</p>`, () => {});
+                        modalClose.onclick = () => {
+                            modalOverlay.classList.add('hidden');
+                            advanceTurn();
+                            renderGame();
+                            syncStateIfOnline();
+                        };
+                        return;
+                    }
+                    const holders = getNopeHolders();
+                    if (holders.length > 0) {
+                        let html2 = `<p>${gameState.playerNames[targetIdx]} has the card. Does anyone play Nope to block the request?</p>`;
+                        html2 += holders.map(h => `<button class="btn" data-nope-player="${h.index}">Play Nope as ${h.name}</button>`).join('');
+                        html2 += '<button class="btn btn-secondary" id="nope-pass-3">No Nope</button>';
+                        showModal('Play Nope?', html2, () => {});
+                        modalContent.querySelectorAll('[data-nope-player]').forEach(nb => {
+                            nb.onclick = () => {
+                                const pIdx = parseInt(nb.dataset.nopePlayer, 10);
+                                const hand = gameState.players[pIdx].hand;
+                                const nopeIdx = hand.findIndex(c => c.id === 'nope');
+                                if (nopeIdx >= 0) {
+                                    const nopeCard = hand.splice(nopeIdx, 1)[0];
+                                    gameState.discardPile.push(nopeCard);
+                                }
+                                modalOverlay.classList.add('hidden');
+                                showModal('3 cats wasted', '<p>Nope! The request was blocked. 3 cats wasted.</p>', () => {});
+                                modalClose.onclick = () => {
+                                    modalOverlay.classList.add('hidden');
+                                    advanceTurn();
+                                    renderGame();
+                                    syncStateIfOnline();
+                                };
+                            };
+                        });
+                        const passBtn = document.getElementById('nope-pass-3');
+                        if (passBtn) passBtn.onclick = () => {
+                            modalOverlay.classList.add('hidden');
+                            giveRequestedCard(actingPlayerIndex, targetIdx, requestedId);
+                        };
+                    } else {
+                        giveRequestedCard(actingPlayerIndex, targetIdx, requestedId);
+                    }
+                };
+            });
+        };
+    });
+}
+
+function giveRequestedCard(actingPlayerIndex, targetIdx, requestedId) {
+    const targetHand = gameState.players[targetIdx].hand;
+    const cardIdx = targetHand.findIndex(c => c.id === requestedId);
+    if (cardIdx >= 0) {
+        const taken = targetHand.splice(cardIdx, 1)[0];
+        gameState.players[actingPlayerIndex].hand.push(taken);
+    }
+    advanceTurn();
+    renderGame();
+    syncStateIfOnline();
+}
+
+function run5CatPickFromDiscardFlow(actingPlayerIndex) {
+    if (gameState.discardPile.length === 0) {
+        showModal('5 cats wasted', '<p>The discard pile is empty. Nothing to take.</p>', () => {});
+        modalClose.onclick = () => {
+            modalOverlay.classList.add('hidden');
+            advanceTurn();
+            renderGame();
+            syncStateIfOnline();
+        };
+        return;
+    }
+    pickFromDiscardMode = { active: true };
+    renderGame();
+    syncStateIfOnline();
+}
+
+function showNopeModalFromState() {
+    const p = gameState.pendingNope;
+    if (!p) return;
+    const name = gameState.playerNames[p.actingPlayerIndex];
+    let html = `<p><strong>${name}</strong> played ${p.emoji || ''} ${p.cardName}.</p>`;
+    html += '<p>Does anyone want to play a Nope? Each Nope flips whether it takes effect.</p>';
+    const holders = getNopeHolders();
+    if (isOnline) {
+        const me = holders.find(h => h.index === myPlayerIndex);
+        if (me) html += `<button class="btn" data-nope-player="${me.index}">Play Nope (${me.name})</button>`;
+    } else {
+        holders.forEach(h => {
+            html += `<button class="btn" data-nope-player="${h.index}">Play Nope as ${h.name}</button>`;
+        });
+    }
+    html += '<button class="btn btn-secondary" id="nope-pass">No Nope</button>';
+    showModal('Play Nope?', html, () => {});
+    modalContent.querySelectorAll('[data-nope-player]').forEach(btn => {
+        btn.onclick = () => {
+            const idx = parseInt(btn.dataset.nopePlayer, 10);
+            playNopeFromState(idx);
+        };
+    });
+    const passBtn = document.getElementById('nope-pass');
+    if (passBtn) passBtn.onclick = () => { modalOverlay.classList.add('hidden'); resolvePendingNope(); };
+}
+
+// Local (same-device) Nope resolution: lets any player with a Nope cancel or re-enable an effect.
+// onCancelled (optional): called when effect is cancelled (e.g. to advance turn for cat combos).
+// Used only when we want modal-driven flow without persisting pendingNope (kept for any legacy paths).
+function handleLocalNope(actingPlayerIndex, card, effectFn, parity = 0, onCancelled = null) {
+    const nopeHolders = [];
+    for (let i = 0; i < gameState.playerCount; i++) {
+        if (gameState.players[i].eliminated) continue;
+        const hasNope = gameState.players[i].hand.some(c => c.id === 'nope');
+        if (hasNope) {
+            nopeHolders.push({ index: i, name: gameState.playerNames[i] });
+        }
+    }
+
+    // No one can Nope: resolve immediately or treat as cancelled based on parity
+    if (nopeHolders.length === 0) {
+        const cancelled = (parity % 2) === 1;
+        if (!cancelled) {
+            effectFn();
+        } else {
+            if (onCancelled) onCancelled();
+            renderGame();
+            syncStateIfOnline();
+        }
+        return;
+    }
+
+    let html = `<p><strong>${gameState.playerNames[actingPlayerIndex]}</strong> played ${card.emoji || ''} ${card.name}.</p>`;
+    html += '<p>Does anyone want to play a Nope? Each Nope flips whether it takes effect.</p>';
+    html += '<div class="nope-buttons">';
+    nopeHolders.forEach(h => {
+        html += `<button class="btn" data-nope-player="${h.index}">Play Nope as ${h.name}</button>`;
+    });
+    html += '</div>';
+    html += '<button class="btn btn-secondary" id="nope-pass">No more Nopes</button>';
+
+    showModal('Play Nope?', html, () => {});
+
+    // Someone plays a Nope
+    modalContent.querySelectorAll('[data-nope-player]').forEach(btn => {
+        btn.onclick = () => {
+            const pIdx = parseInt(btn.dataset.nopePlayer, 10);
+            const hand = gameState.players[pIdx].hand;
+            const nopeIdx = hand.findIndex(c => c.id === 'nope');
+            if (nopeIdx >= 0) {
+                const nopeCard = hand.splice(nopeIdx, 1)[0];
+                gameState.discardPile.push(nopeCard);
+            }
+            modalOverlay.classList.add('hidden');
+            renderGame();
+            syncStateIfOnline();
+            handleLocalNope(actingPlayerIndex, card, effectFn, parity ^ 1, onCancelled);
+        };
+    });
+
+    const passBtn = document.getElementById('nope-pass');
+    if (passBtn) {
+        passBtn.onclick = () => {
+            modalOverlay.classList.add('hidden');
+            const cancelled = (parity % 2) === 1;
+            if (!cancelled) {
+                effectFn();
+            } else {
+                if (onCancelled) onCancelled();
+                renderGame();
+                syncStateIfOnline();
+            }
+        };
+    }
 }
 
 // Show modal
@@ -820,55 +1191,23 @@ function executeActionCard(index) {
     gameState.discardPile.push(card);
     pendingCards = [];
 
-    if (card.id === 'skip') {
-        if (gameState.attacksPending > 0) {
-            gameState.attacksPending--;
-            if (gameState.attacksPending === 0) advanceTurn();
-        } else {
-            advanceTurn();
-        }
-    } else if (card.id === 'attack') {
-        gameState.attacksPending = (gameState.attacksPending || 0) + 2;
+    if (card.id === 'nope') {
         advanceTurn();
-    } else if (card.id === 'see_future') {
-        const top3 = gameState.drawPile.slice(0, 3);
-        const html = top3.map(c => `<div class="card ${c.cssClass}">${c.emoji} ${c.name}</div>`).join('');
-        showModal('See the Future', html);
-        advanceTurn();
-    } else if (card.id === 'shuffle') {
-        gameState.drawPile = shuffle(gameState.drawPile);
-        advanceTurn();
-    } else if (card.id === 'nope') {
-        advanceTurn();
-    } else if (card.id === 'favor') {
-        const targets = [];
-        for (let i = 0; i < gameState.playerCount; i++) {
-            if (i !== gameState.currentPlayerIndex && !gameState.players[i].eliminated && gameState.players[i].hand.length > 0) {
-                targets.push({ index: i, name: gameState.playerNames[i] });
-            }
-        }
-        if (targets.length === 0) {
-            advanceTurn();
-        } else {
-            const html = targets.map(t => `<button class="btn" data-target="${t.index}">${t.name}</button>`).join('');
-            showModal('Choose player to take a card from', html, () => {});
-            modalContent.querySelectorAll('button').forEach(btn => {
-                btn.onclick = () => {
-                    const targetIdx = parseInt(btn.dataset.target, 10);
-                    const targetHand = gameState.players[targetIdx].hand;
-                    const cardIdx = Math.floor(Math.random() * targetHand.length);
-                    const taken = targetHand.splice(cardIdx, 1)[0];
-                    player.hand.push(taken);
-                    modalOverlay.classList.add('hidden');
-                    advanceTurn();
-                    renderGame();
-                    syncStateIfOnline();
-                };
-            });
-        }
+        renderGame();
+        syncStateIfOnline();
+        return;
     }
-    renderGame();
+
+    // All other action cards: open Nope window (local + online)
+    gameState.pendingNope = {
+        actingPlayerIndex: gameState.currentPlayerIndex,
+        effectType: card.id,
+        cardName: card.name,
+        emoji: card.emoji,
+        parity: 0,
+    };
     syncStateIfOnline();
+    renderGame();
 }
 
 function executeCatCombo(count) {
@@ -885,6 +1224,7 @@ function executeCatCombo(count) {
     });
     gameState.discardPile.push(...cardsToDiscard);
     pendingCards = [];
+    syncStateIfOnline();
 
     if (count === 2) {
         const targets = [];
@@ -895,45 +1235,34 @@ function executeCatCombo(count) {
         }
         if (targets.length > 0) {
             catStealMode = { waitingForCardClick: true };
-            syncStateIfOnline();
             renderGame();
         } else {
             advanceTurn();
             renderGame();
             syncStateIfOnline();
         }
-    } else {
-        showModal('Request a specific card', '<p>Pick a player to request a card from (simplified: random card taken)</p>', () => {});
-        const targets = [];
-        for (let i = 0; i < gameState.playerCount; i++) {
-            if (i !== gameState.currentPlayerIndex && !gameState.players[i].eliminated && gameState.players[i].hand.length > 0) {
-                targets.push({ index: i, name: gameState.playerNames[i] });
-            }
-        }
-        if (targets.length > 0) {
-            const html = targets.map(t => `<button class="btn" data-target="${t.index}">${t.name}</button>`).join('');
-            modalContent.innerHTML = html;
-            modalContent.querySelectorAll('button').forEach(btn => {
-                btn.onclick = () => {
-                    const targetIdx = parseInt(btn.dataset.target, 10);
-                    const targetHand = gameState.players[targetIdx].hand;
-                    if (targetHand.length > 0) {
-                        const cardIdx = Math.floor(Math.random() * targetHand.length);
-                        const taken = targetHand.splice(cardIdx, 1)[0];
-                        player.hand.push(taken);
-                    }
-                    modalOverlay.classList.add('hidden');
-                    advanceTurn();
-                    renderGame();
-                    syncStateIfOnline();
-                };
-            });
-        } else {
-            modalContent.innerHTML = '<p>No valid targets.</p>';
-            advanceTurn();
-            renderGame();
-        }
+    } else if (count === 3) {
+        const actingPlayerIndex = gameState.currentPlayerIndex;
+        gameState.pendingNope = {
+            actingPlayerIndex,
+            effectType: '3cat',
+            cardName: '3 Same Cats (request a card)',
+            emoji: '🐱',
+            parity: 0,
+        };
         syncStateIfOnline();
+        renderGame();
+    } else if (count === 5) {
+        const actingPlayerIndex = gameState.currentPlayerIndex;
+        gameState.pendingNope = {
+            actingPlayerIndex,
+            effectType: '5cat',
+            cardName: '5 Different Cats (pick from discard)',
+            emoji: '🐱',
+            parity: 0,
+        };
+        syncStateIfOnline();
+        renderGame();
     }
 }
 
