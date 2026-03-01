@@ -857,7 +857,7 @@ function onCatStealCardClick(targetPlayerIndex, cardIndex) {
     player.hand.push(taken);
     catStealMode = null;
     pendingCards = [];
-    advanceTurn();
+    // Same player's turn continues; they still must draw later.
     renderGame();
     syncStateIfOnline();
 }
@@ -869,7 +869,7 @@ function onPickFromDiscardClick(discardIndex) {
     const card = dp.splice(discardIndex, 1)[0];
     gameState.players[gameState.currentPlayerIndex].hand.push(card);
     pickFromDiscardMode = null;
-    advanceTurn();
+    // Still same player's turn; they must still draw later.
     renderGame();
     syncStateIfOnline();
 }
@@ -972,7 +972,7 @@ function run3CatRequestFlow(actingPlayerIndex) {
         }
     }
     if (targets.length === 0) {
-        advanceTurn();
+        // No valid targets; 3 cats are wasted but turn continues.
         renderGame();
         syncStateIfOnline();
         return;
@@ -998,7 +998,7 @@ function run3CatRequestFlow(actingPlayerIndex) {
                         showModal('3 cats wasted', `<p>${gameState.playerNames[targetIdx]} doesn't have that card. Nothing happens.</p>`, () => {});
                         modalClose.onclick = () => {
                             modalOverlay.classList.add('hidden');
-                            advanceTurn();
+                            // Same player's turn continues.
                             renderGame();
                             syncStateIfOnline();
                         };
@@ -1023,7 +1023,7 @@ function run3CatRequestFlow(actingPlayerIndex) {
                                 showModal('3 cats wasted', '<p>Nope! The request was blocked. 3 cats wasted.</p>', () => {});
                                 modalClose.onclick = () => {
                                     modalOverlay.classList.add('hidden');
-                                    advanceTurn();
+                                    // Same player's turn continues.
                                     renderGame();
                                     syncStateIfOnline();
                                 };
@@ -1050,7 +1050,7 @@ function giveRequestedCard(actingPlayerIndex, targetIdx, requestedId) {
         const taken = targetHand.splice(cardIdx, 1)[0];
         gameState.players[actingPlayerIndex].hand.push(taken);
     }
-    advanceTurn();
+    // Request resolved; same player's turn continues so they can still draw.
     renderGame();
     syncStateIfOnline();
 }
@@ -1060,7 +1060,7 @@ function run5CatPickFromDiscardFlow(actingPlayerIndex) {
         showModal('5 cats wasted', '<p>The discard pile is empty. Nothing to take.</p>', () => {});
         modalClose.onclick = () => {
             modalOverlay.classList.add('hidden');
-            advanceTurn();
+            // Turn continues.
             renderGame();
             syncStateIfOnline();
         };
@@ -1189,21 +1189,75 @@ function executeActionCard(index) {
     gameState.discardPile.push(card);
     pendingCards = [];
 
-    if (card.id === 'nope') {
+    // Turn only ends immediately for Skip / Attack.
+    if (card.id === 'skip') {
+        if (gameState.attacksPending > 0) {
+            gameState.attacksPending--;
+            if (gameState.attacksPending === 0) advanceTurn();
+        } else {
+            advanceTurn();
+        }
+        renderGame();
+        syncStateIfOnline();
+        return;
+    }
+
+    if (card.id === 'attack') {
+        gameState.attacksPending = (gameState.attacksPending || 0) + 2;
         advanceTurn();
         renderGame();
         syncStateIfOnline();
         return;
     }
 
-    // All other action cards: open Nope window (local + online)
-    gameState.pendingNope = {
-        actingPlayerIndex: gameState.currentPlayerIndex,
-        effectType: card.id,
-        cardName: card.name,
-        emoji: card.emoji,
-        parity: 0,
-    };
+    if (card.id === 'see_future') {
+        const top3 = gameState.drawPile.slice(0, 3);
+        const html = top3.map(c => `<div class="card ${c.cssClass}">${c.emoji} ${c.name}</div>`).join('');
+        showModal('See the Future', html);
+        renderGame();
+        syncStateIfOnline();
+        return;
+    }
+
+    if (card.id === 'shuffle') {
+        gameState.drawPile = shuffle(gameState.drawPile);
+        // Same player's turn continues; they still must draw later.
+        renderGame();
+        syncStateIfOnline();
+        return;
+    }
+
+    if (card.id === 'favor') {
+        const targets = [];
+        for (let i = 0; i < gameState.playerCount; i++) {
+            if (i !== gameState.currentPlayerIndex && !gameState.players[i].eliminated && gameState.players[i].hand.length > 0) {
+                targets.push({ index: i, name: gameState.playerNames[i] });
+            }
+        }
+        if (targets.length === 0) {
+            renderGame();
+            syncStateIfOnline();
+            return;
+        }
+        const html = targets.map(t => `<button class="btn" data-target="${t.index}">${t.name}</button>`).join('');
+        showModal('Choose player to take a card from', html, () => {});
+        modalContent.querySelectorAll('button').forEach(btn => {
+            btn.onclick = () => {
+                const targetIdx = parseInt(btn.dataset.target, 10);
+                const targetHand = gameState.players[targetIdx].hand;
+                const cardIdx = Math.floor(Math.random() * targetHand.length);
+                const taken = targetHand.splice(cardIdx, 1)[0];
+                player.hand.push(taken);
+                modalOverlay.classList.add('hidden');
+                // Still same player's turn.
+                renderGame();
+                syncStateIfOnline();
+            };
+        });
+        return;
+    }
+
+    // Playing Nope (or any other action we don't special‑case) just discards it; turn continues.
     syncStateIfOnline();
     renderGame();
 }
