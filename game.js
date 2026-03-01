@@ -736,8 +736,6 @@ function renderGame() {
     });
 
     drawBtn.disabled = !isMyTurn || myHand.eliminated || inCatSteal || inPickFromDiscard;
-
-    if (gameState.pendingNope) showNopeModalFromState();
 }
 
 function canPlayCard(card, index) {
@@ -1242,27 +1240,9 @@ function executeCatCombo(count) {
             syncStateIfOnline();
         }
     } else if (count === 3) {
-        const actingPlayerIndex = gameState.currentPlayerIndex;
-        gameState.pendingNope = {
-            actingPlayerIndex,
-            effectType: '3cat',
-            cardName: '3 Same Cats (request a card)',
-            emoji: '🐱',
-            parity: 0,
-        };
-        syncStateIfOnline();
-        renderGame();
+        run3CatRequestFlow(gameState.currentPlayerIndex);
     } else if (count === 5) {
-        const actingPlayerIndex = gameState.currentPlayerIndex;
-        gameState.pendingNope = {
-            actingPlayerIndex,
-            effectType: '5cat',
-            cardName: '5 Different Cats (pick from discard)',
-            emoji: '🐱',
-            parity: 0,
-        };
-        syncStateIfOnline();
-        renderGame();
+        run5CatPickFromDiscardFlow(gameState.currentPlayerIndex);
     }
 }
 
