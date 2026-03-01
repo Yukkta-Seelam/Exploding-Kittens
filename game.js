@@ -77,7 +77,7 @@ let isOnline = false;
 let myUserId = null;
 let roomCode = null;
 let roomUnsubscribe = null;
-let supabase = null;
+let supabaseClient = null;
 let myPlayerIndex = 0;
 
 function getMyUserId() {
@@ -210,12 +210,12 @@ try {
         window.supabaseUrl && window.supabaseAnonKey &&
         String(window.supabaseUrl).includes('YOUR_PROJECT') === false &&
         String(window.supabaseAnonKey).includes('YOUR_ANON') === false) {
-        supabase = window.supabase.createClient(window.supabaseUrl, window.supabaseAnonKey);
+        supabaseClient = window.supabase.createClient(window.supabaseUrl, window.supabaseAnonKey);
     }
 } catch (e) {
     console.warn('Supabase init failed', e);
 }
-const hasSupabase = () => supabase != null;
+const hasSupabase = () => supabaseClient != null;
 
 const SUPABASE_SETUP_MSG = 'Online play needs Supabase. Add your project URL and anon key to supabase-config.js (see README). Run supabase-setup.sql in the SQL Editor, then redeploy.';
 
@@ -248,7 +248,7 @@ function generateRoomCode() {
 }
 
 async function createRoom() {
-    if (!supabase) {
+    if (!supabaseClient) {
         alert(SUPABASE_SETUP_MSG);
         return;
     }
@@ -257,7 +257,7 @@ async function createRoom() {
     const maxPlayers = parseInt(createPlayerCountSelect?.value || '5', 10);
     const uid = getMyUserId();
     roomCode = generateRoomCode();
-    const { error } = await supabase.from('rooms').insert({
+    const { error } = await supabaseClient.from('rooms').insert({
         room_code: roomCode,
         host_id: uid,
         player_ids: [uid],
@@ -276,7 +276,7 @@ async function createRoom() {
 }
 
 async function joinRoom() {
-    if (!supabase) {
+    if (!supabaseClient) {
         alert(SUPABASE_SETUP_MSG);
         return;
     }
@@ -287,7 +287,7 @@ async function joinRoom() {
         return;
     }
     const uid = getMyUserId();
-    const { data: row, error: fetchErr } = await supabase.from('rooms').select('*').eq('room_code', code).single();
+    const { data: row, error: fetchErr } = await supabaseClient.from('rooms').select('*').eq('room_code', code).single();
     if (fetchErr || !row) {
         alert('No party found with that code. Check the code and try again.');
         return;
@@ -309,7 +309,7 @@ async function joinRoom() {
         alert('This party is full.');
         return;
     }
-    const { error: updateErr } = await supabase.from('rooms').update({
+    const { error: updateErr } = await supabaseClient.from('rooms').update({
         player_ids: [...playerIds, uid],
         player_names: [...playerNames, name],
         last_updated: new Date().toISOString(),
@@ -338,12 +338,12 @@ function mapRoomRow(row) {
 }
 
 function subscribeToRoom() {
-    if (!supabase || !roomCode) return;
+    if (!supabaseClient || !roomCode) return;
     if (roomUnsubscribe) {
         roomUnsubscribe.unsubscribe();
         roomUnsubscribe = null;
     }
-    const channel = supabase.channel('room-' + roomCode).on('postgres_changes', {
+    const channel = supabaseClient.channel('room-' + roomCode).on('postgres_changes', {
         event: '*',
         schema: 'public',
         table: 'rooms',
@@ -379,7 +379,7 @@ function subscribeToRoom() {
     }).subscribe();
     roomUnsubscribe = channel;
     // Load current state once
-    supabase.from('rooms').select('*').eq('room_code', roomCode).single().then(({ data: row }) => {
+    supabaseClient.from('rooms').select('*').eq('room_code', roomCode).single().then(({ data: row }) => {
         if (row) {
             const data = mapRoomRow(row);
             if (data.status === 'lobby') {
@@ -394,8 +394,8 @@ function subscribeToRoom() {
 }
 
 async function startGameOnline() {
-    if (!supabase || !roomCode) return;
-    const { data: row, error: fetchErr } = await supabase.from('rooms').select('*').eq('room_code', roomCode).single();
+    if (!supabaseClient || !roomCode) return;
+    const { data: row, error: fetchErr } = await supabaseClient.from('rooms').select('*').eq('room_code', roomCode).single();
     if (fetchErr || !row) return;
     const data = mapRoomRow(row);
     if (data.hostId !== getMyUserId() || data.status !== 'lobby') return;
@@ -437,7 +437,7 @@ async function startGameOnline() {
     const explodingCount = playerCount - 1;
     for (let i = 0; i < explodingCount; i++) deck.push(CARD_TYPES.EXPLODING);
     gameState.drawPile = shuffle(deck);
-    const { error: updateErr } = await supabase.from('rooms').update({
+    const { error: updateErr } = await supabaseClient.from('rooms').update({
         status: 'playing',
         game_state: serializeState(),
         last_updated: new Date().toISOString(),
@@ -448,8 +448,8 @@ async function startGameOnline() {
 }
 
 async function updateGameStateOnline(state) {
-    if (!supabase || !roomCode) return;
-    await supabase.from('rooms').update({
+    if (!supabaseClient || !roomCode) return;
+    await supabaseClient.from('rooms').update({
         game_state: state,
         last_updated: new Date().toISOString(),
     }).eq('room_code', roomCode);
@@ -460,8 +460,8 @@ function leaveRoom() {
         roomUnsubscribe.unsubscribe();
         roomUnsubscribe = null;
     }
-    if (supabase && roomCode) {
-        supabase.from('rooms').select('*').eq('room_code', roomCode).single().then(({ data: row }) => {
+    if (supabaseClient && roomCode) {
+        supabaseClient.from('rooms').select('*').eq('room_code', roomCode).single().then(({ data: row }) => {
             if (!row) return;
             const uid = getMyUserId();
             const ids = [...(row.player_ids || [])];
@@ -471,11 +471,11 @@ function leaveRoom() {
                 ids.splice(idx, 1);
                 names.splice(idx, 1);
                 if (ids.length === 0) {
-                    supabase.from('rooms').delete().eq('room_code', roomCode).then(() => {});
+                    supabaseClient.from('rooms').delete().eq('room_code', roomCode).then(() => {});
                 } else {
                     const updates = { player_ids: ids, player_names: names, last_updated: new Date().toISOString() };
                     if (row.host_id === uid) updates.host_id = ids[0];
-                    supabase.from('rooms').update(updates).eq('room_code', roomCode).then(() => {});
+                    supabaseClient.from('rooms').update(updates).eq('room_code', roomCode).then(() => {});
                 }
             }
         });
@@ -854,8 +854,8 @@ function drawCard() {
 
 function showWinner(winnerIndex) {
     gameState.winnerIndex = winnerIndex;
-    if (isOnline && supabase && roomCode) {
-        supabase.from('rooms').update({
+    if (isOnline && supabaseClient && roomCode) {
+        supabaseClient.from('rooms').update({
             status: 'ended',
             game_state: serializeState(),
             last_updated: new Date().toISOString(),
@@ -867,7 +867,7 @@ function showWinner(winnerIndex) {
 }
 
 function syncStateIfOnline() {
-    if (isOnline && supabase && roomCode) {
+    if (isOnline && supabaseClient && roomCode) {
         updateGameStateOnline(serializeState()).catch(() => {});
     }
 }
