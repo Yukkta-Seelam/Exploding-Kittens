@@ -170,6 +170,7 @@ const roomLeaveBtn = document.getElementById('room-leave-btn');
 
 // Player count options based on mode
 function updatePlayerCountOptions() {
+    if (!gameModeSelect || !playerCountSelect) return;
     const mode = gameModeSelect.value;
     const select = playerCountSelect;
     select.innerHTML = '';
@@ -183,6 +184,7 @@ function updatePlayerCountOptions() {
 }
 
 function updatePlayerNameInputs() {
+    if (!playerCountSelect || !playerNamesDiv) return;
     const count = parseInt(playerCountSelect.value, 10);
     playerNamesDiv.innerHTML = '';
     for (let i = 0; i < count; i++) {
@@ -193,28 +195,44 @@ function updatePlayerNameInputs() {
     }
 }
 
-gameModeSelect.addEventListener('change', () => {
+if (gameModeSelect) gameModeSelect.addEventListener('change', () => {
     updatePlayerCountOptions();
     updatePlayerNameInputs();
 });
+if (playerCountSelect) playerCountSelect.addEventListener('change', updatePlayerNameInputs);
 
-playerCountSelect.addEventListener('change', updatePlayerNameInputs);
-
-// Initialize
-updatePlayerCountOptions();
-updatePlayerNameInputs();
-
-// Supabase init (optional) - must not throw or buttons won't work
-try {
-    if (typeof window.supabase !== 'undefined' && typeof window.supabase.createClient === 'function' &&
-        window.supabaseUrl && window.supabaseAnonKey &&
-        String(window.supabaseUrl).includes('YOUR_PROJECT') === false &&
-        String(window.supabaseAnonKey).includes('YOUR_ANON') === false) {
-        supabaseClient = window.supabase.createClient(window.supabaseUrl, window.supabaseAnonKey);
-    }
-} catch (e) {
-    console.warn('Supabase init failed', e);
+// Initialize (only if elements exist)
+if (gameModeSelect && playerCountSelect) {
+    updatePlayerCountOptions();
+    updatePlayerNameInputs();
 }
+
+// Supabase: load script only when needed (avoids global conflict and keeps Play Locally working)
+function loadSupabaseScript() {
+    return new Promise((resolve) => {
+        if (typeof window.supabase !== 'undefined' && typeof window.supabase.createClient === 'function') {
+            resolve();
+            return;
+        }
+        const s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';
+        s.onload = () => resolve();
+        s.onerror = () => resolve();
+        document.head.appendChild(s);
+    });
+}
+
+function initSupabaseClient() {
+    try {
+        if (window.supabase && typeof window.supabase.createClient === 'function' &&
+            window.supabaseUrl && window.supabaseAnonKey &&
+            String(window.supabaseUrl).includes('YOUR_PROJECT') === false &&
+            String(window.supabaseAnonKey).includes('YOUR_ANON') === false) {
+            supabaseClient = window.supabase.createClient(window.supabaseUrl, window.supabaseAnonKey);
+        }
+    } catch (e) { console.warn('Supabase init failed', e); }
+}
+
 const hasSupabase = () => supabaseClient != null;
 
 const SUPABASE_SETUP_MSG = 'Online play needs Supabase. Add your project URL and anon key to supabase-config.js (see README). Run supabase-setup.sql in the SQL Editor, then redeploy.';
@@ -570,17 +588,21 @@ function getNextPlayer(fromIndex) {
 // Render game UI
 function renderGame() {
     pileCountEl.textContent = gameState.drawPile.length;
-    const currentPlayer = gameState.players[gameState.currentPlayerIndex];
-    const name = gameState.playerNames[gameState.currentPlayerIndex];
-    const isMyTurn = !isOnline || (myPlayerIndex === gameState.currentPlayerIndex);
+    const turnPlayerIndex = gameState.currentPlayerIndex;
+    const turnPlayerName = gameState.playerNames[turnPlayerIndex];
+    const isMyTurn = !isOnline || (myPlayerIndex === turnPlayerIndex);
 
-    turnIndicatorEl.textContent = `${name}'s Turn`;
-    currentPlayerLabel.textContent = `${name}'s Hand`;
+    // In online mode: each player sees only THEIR hand. In local mode: show current turn player's hand.
+    const handToShowIndex = isOnline ? myPlayerIndex : turnPlayerIndex;
+    const myHand = gameState.players[handToShowIndex];
 
-    // Opponents
+    turnIndicatorEl.textContent = `${turnPlayerName}'s Turn`;
+    currentPlayerLabel.textContent = isOnline ? 'Your Hand' : `${turnPlayerName}'s Hand`;
+
+    // Opponents: everyone whose hand we're NOT showing (hide their cards - show ? only)
     playersAreaEl.innerHTML = '';
     for (let i = 0; i < gameState.playerCount; i++) {
-        if (i === gameState.currentPlayerIndex) continue;
+        if (i === handToShowIndex) continue;
         if (gameState.players[i].eliminated) continue;
         const opp = document.createElement('div');
         opp.className = 'opponent-info';
@@ -593,11 +615,11 @@ function renderGame() {
         playersAreaEl.appendChild(opp);
     }
 
-    // Current player hand (only playable when it's your turn in online mode)
+    // Show hand (only playable when it's your turn in online mode)
     handEl.innerHTML = '';
-    currentPlayer.hand.forEach((card, idx) => {
+    myHand.hand.forEach((card, idx) => {
         let playable = canPlayCard(card, idx);
-        if (isOnline) playable = playable && isMyTurn && !currentPlayer.eliminated;
+        if (isOnline) playable = playable && isMyTurn && !myHand.eliminated;
         const el = createCardElement(card, idx, playable);
         if (playable) {
             el.addEventListener('click', () => playCard(idx));
@@ -605,7 +627,7 @@ function renderGame() {
         handEl.appendChild(el);
     });
 
-    drawBtn.disabled = !isMyTurn || currentPlayer.eliminated;
+    drawBtn.disabled = !isMyTurn || myHand.eliminated;
 }
 
 function canPlayCard(card, index) {
@@ -918,7 +940,12 @@ if (playAgainBtn) playAgainBtn.addEventListener('click', () => {
 
 // Home & online flow
 if (playLocalBtn) playLocalBtn.addEventListener('click', () => showScreen('lobby'));
-if (playOnlineBtn) playOnlineBtn.addEventListener('click', () => showScreen('online-setup'));
+if (playOnlineBtn) playOnlineBtn.addEventListener('click', () => {
+    loadSupabaseScript().then(() => {
+        initSupabaseClient();
+        showScreen('online-setup');
+    });
+});
 if (createPartyBtn) createPartyBtn.addEventListener('click', () => showScreen('create-party-form'));
 if (onlineBackBtn) onlineBackBtn.addEventListener('click', () => showScreen('home'));
 if (createBackBtn) createBackBtn.addEventListener('click', () => showScreen('online-setup'));
