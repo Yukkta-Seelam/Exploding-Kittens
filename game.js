@@ -72,12 +72,12 @@ let gameState = {
     gameMode: 'base',
 };
 
-// Online state
+// Online state (Supabase)
 let isOnline = false;
 let myUserId = null;
 let roomCode = null;
 let roomUnsubscribe = null;
-let db = null;
+let supabase = null;
 let myPlayerIndex = 0;
 
 function getMyUserId() {
@@ -204,16 +204,16 @@ playerCountSelect.addEventListener('change', updatePlayerNameInputs);
 updatePlayerCountOptions();
 updatePlayerNameInputs();
 
-// Firebase init (optional)
-if (typeof firebase !== 'undefined' && window.firebaseConfig && window.firebaseConfig.apiKey && window.firebaseConfig.apiKey !== 'YOUR_API_KEY') {
+// Supabase init (optional)
+if (typeof window.supabase !== 'undefined' && window.supabaseUrl && window.supabaseAnonKey &&
+    window.supabaseUrl.includes('YOUR_PROJECT') === false && window.supabaseAnonKey.includes('YOUR_ANON') === false) {
     try {
-        firebase.initializeApp(window.firebaseConfig);
-        db = firebase.firestore();
-    } catch (e) { console.warn('Firebase init failed', e); }
+        supabase = window.supabase.createClient(window.supabaseUrl, window.supabaseAnonKey);
+    } catch (e) { console.warn('Supabase init failed', e); }
 }
-const hasFirebase = () => db != null;
+const hasSupabase = () => supabase != null;
 
-const FIREBASE_SETUP_MSG = 'Online play needs Firebase. In this repo, add your Firebase config to firebase-config.js (see README or firebase-config.example.js). Then redeploy.';
+const SUPABASE_SETUP_MSG = 'Online play needs Supabase. Add your project URL and anon key to supabase-config.js (see README). Run supabase-setup.sql in the SQL Editor, then redeploy.';
 
 if (createGameModeSelect && createPlayerCountSelect) {
     const updateCreatePlayerCount = () => {
@@ -244,8 +244,8 @@ function generateRoomCode() {
 }
 
 async function createRoom() {
-    if (!db) {
-        alert(FIREBASE_SETUP_MSG);
+    if (!supabase) {
+        alert(SUPABASE_SETUP_MSG);
         return;
     }
     const name = (hostNameInput?.value || '').trim() || 'Host';
@@ -253,24 +253,27 @@ async function createRoom() {
     const maxPlayers = parseInt(createPlayerCountSelect?.value || '5', 10);
     const uid = getMyUserId();
     roomCode = generateRoomCode();
-    const roomRef = db.collection('rooms').doc(roomCode);
-    await roomRef.set({
-        hostId: uid,
-        playerIds: [uid],
-        playerNames: [name],
+    const { error } = await supabase.from('rooms').insert({
+        room_code: roomCode,
+        host_id: uid,
+        player_ids: [uid],
+        player_names: [name],
         status: 'lobby',
-        gameMode,
-        playerCount: maxPlayers,
-        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        game_mode: gameMode,
+        player_count: maxPlayers,
     });
+    if (error) {
+        alert('Could not create room. Try again.');
+        return;
+    }
     isOnline = true;
     showScreen('room-lobby');
     subscribeToRoom();
 }
 
 async function joinRoom() {
-    if (!db) {
-        alert(FIREBASE_SETUP_MSG);
+    if (!supabase) {
+        alert(SUPABASE_SETUP_MSG);
         return;
     }
     const code = (partyCodeInput?.value || '').trim().toUpperCase().replace(/\s/g, '');
@@ -280,48 +283,75 @@ async function joinRoom() {
         return;
     }
     const uid = getMyUserId();
-    const roomRef = db.collection('rooms').doc(code);
-    const doc = await roomRef.get();
-    if (!doc.exists) {
+    const { data: row, error: fetchErr } = await supabase.from('rooms').select('*').eq('room_code', code).single();
+    if (fetchErr || !row) {
         alert('No party found with that code. Check the code and try again.');
         return;
     }
-    const data = doc.data();
-    if (data.status !== 'lobby') {
+    if (row.status !== 'lobby') {
         alert('That game has already started.');
         return;
     }
-    if (data.playerIds && data.playerIds.includes(uid)) {
+    const playerIds = row.player_ids || [];
+    const playerNames = row.player_names || [];
+    if (playerIds.includes(uid)) {
         roomCode = code;
         isOnline = true;
         showScreen('room-lobby');
         subscribeToRoom();
         return;
     }
-    if (data.playerIds && data.playerIds.length >= data.playerCount) {
+    if (playerIds.length >= row.player_count) {
         alert('This party is full.');
         return;
     }
-    await roomRef.update({
-        playerIds: firebase.firestore.FieldValue.arrayUnion(uid),
-        playerNames: firebase.firestore.FieldValue.arrayUnion(name),
-    });
+    const { error: updateErr } = await supabase.from('rooms').update({
+        player_ids: [...playerIds, uid],
+        player_names: [...playerNames, name],
+        last_updated: new Date().toISOString(),
+    }).eq('room_code', code);
+    if (updateErr) {
+        alert('Could not join. Try again.');
+        return;
+    }
     roomCode = code;
     isOnline = true;
     showScreen('room-lobby');
     subscribeToRoom();
 }
 
+function mapRoomRow(row) {
+    if (!row) return null;
+    return {
+        hostId: row.host_id,
+        playerIds: row.player_ids || [],
+        playerNames: row.player_names || [],
+        status: row.status,
+        gameMode: row.game_mode,
+        playerCount: row.player_count,
+        gameState: row.game_state,
+    };
+}
+
 function subscribeToRoom() {
-    if (!db || !roomCode) return;
-    if (roomUnsubscribe) roomUnsubscribe();
-    const roomRef = db.collection('rooms').doc(roomCode);
-    roomUnsubscribe = roomRef.onSnapshot(doc => {
-        if (!doc.exists) return;
-        const data = doc.data();
+    if (!supabase || !roomCode) return;
+    if (roomUnsubscribe) {
+        roomUnsubscribe.unsubscribe();
+        roomUnsubscribe = null;
+    }
+    const channel = supabase.channel('room-' + roomCode).on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'rooms',
+        filter: 'room_code=eq.' + roomCode,
+    }, (payload) => {
+        const row = payload.new || payload.old;
+        if (!row) return;
+        const data = mapRoomRow(row);
+        if (!data) return;
         if (data.status === 'lobby') {
             displayPartyCodeEl.textContent = roomCode;
-            roomPlayersListEl.innerHTML = (data.playerNames || []).map((n, i) => `<li>${n}</li>`).join('');
+            roomPlayersListEl.innerHTML = (data.playerNames || []).map((n) => `<li>${n}</li>`).join('');
             const isHost = data.hostId === getMyUserId();
             roomStartBtn.disabled = !isHost || (data.playerIds || []).length < 2;
             roomStartHint.textContent = (data.playerIds || []).length < 2 ? 'Need at least 2 players to start' : (isHost ? 'Click Start when everyone has joined' : 'Waiting for host to start');
@@ -342,15 +372,28 @@ function subscribeToRoom() {
             deserializeState(data.gameState, gameState.playerNames);
             showWinner(data.gameState.winnerIndex);
         }
+    }).subscribe();
+    roomUnsubscribe = channel;
+    // Load current state once
+    supabase.from('rooms').select('*').eq('room_code', roomCode).single().then(({ data: row }) => {
+        if (row) {
+            const data = mapRoomRow(row);
+            if (data.status === 'lobby') {
+                displayPartyCodeEl.textContent = roomCode;
+                roomPlayersListEl.innerHTML = (data.playerNames || []).map((n) => `<li>${n}</li>`).join('');
+                const isHost = data.hostId === getMyUserId();
+                roomStartBtn.disabled = !isHost || (data.playerIds || []).length < 2;
+                roomStartHint.textContent = (data.playerIds || []).length < 2 ? 'Need at least 2 players to start' : (isHost ? 'Click Start when everyone has joined' : 'Waiting for host to start');
+            }
+        }
     });
 }
 
 async function startGameOnline() {
-    if (!db || !roomCode) return;
-    const roomRef = db.collection('rooms').doc(roomCode);
-    const doc = await roomRef.get();
-    if (!doc.exists) return;
-    const data = doc.data();
+    if (!supabase || !roomCode) return;
+    const { data: row, error: fetchErr } = await supabase.from('rooms').select('*').eq('room_code', roomCode).single();
+    if (fetchErr || !row) return;
+    const data = mapRoomRow(row);
     if (data.hostId !== getMyUserId() || data.status !== 'lobby') return;
     const playerNames = data.playerNames || [];
     const playerCount = playerNames.length;
@@ -390,43 +433,46 @@ async function startGameOnline() {
     const explodingCount = playerCount - 1;
     for (let i = 0; i < explodingCount; i++) deck.push(CARD_TYPES.EXPLODING);
     gameState.drawPile = shuffle(deck);
-    await roomRef.update({
+    const { error: updateErr } = await supabase.from('rooms').update({
         status: 'playing',
-        gameState: serializeState(),
-    });
+        game_state: serializeState(),
+        last_updated: new Date().toISOString(),
+    }).eq('room_code', roomCode);
+    if (updateErr) return;
     showScreen('game');
     renderGame();
 }
 
 async function updateGameStateOnline(state) {
-    if (!db || !roomCode) return;
-    await db.collection('rooms').doc(roomCode).update({
-        gameState: state,
-        lastUpdated: firebase.firestore.FieldValue.serverTimestamp(),
-    });
+    if (!supabase || !roomCode) return;
+    await supabase.from('rooms').update({
+        game_state: state,
+        last_updated: new Date().toISOString(),
+    }).eq('room_code', roomCode);
 }
 
 function leaveRoom() {
     if (roomUnsubscribe) {
-        roomUnsubscribe();
+        roomUnsubscribe.unsubscribe();
         roomUnsubscribe = null;
     }
-    if (db && roomCode) {
-        const roomRef = db.collection('rooms').doc(roomCode);
-        roomRef.get().then(doc => {
-            if (!doc.exists) return;
-            const data = doc.data();
+    if (supabase && roomCode) {
+        supabase.from('rooms').select('*').eq('room_code', roomCode).single().then(({ data: row }) => {
+            if (!row) return;
             const uid = getMyUserId();
-            const ids = data.playerIds || [];
-            const names = data.playerNames || [];
+            const ids = [...(row.player_ids || [])];
+            const names = [...(row.player_names || [])];
             const idx = ids.indexOf(uid);
             if (idx >= 0) {
                 ids.splice(idx, 1);
                 names.splice(idx, 1);
-                const updates = { playerIds: ids, playerNames: names };
-                if (data.hostId === uid && ids.length > 0) updates.hostId = ids[0];
-                if (ids.length === 0) roomRef.delete();
-                else roomRef.update(updates);
+                if (ids.length === 0) {
+                    supabase.from('rooms').delete().eq('room_code', roomCode).then(() => {});
+                } else {
+                    const updates = { player_ids: ids, player_names: names, last_updated: new Date().toISOString() };
+                    if (row.host_id === uid) updates.host_id = ids[0];
+                    supabase.from('rooms').update(updates).eq('room_code', roomCode).then(() => {});
+                }
             }
         });
     }
@@ -804,11 +850,12 @@ function drawCard() {
 
 function showWinner(winnerIndex) {
     gameState.winnerIndex = winnerIndex;
-    if (isOnline && db && roomCode) {
-        db.collection('rooms').doc(roomCode).update({
+    if (isOnline && supabase && roomCode) {
+        supabase.from('rooms').update({
             status: 'ended',
-            gameState: serializeState(),
-        }).catch(() => {});
+            game_state: serializeState(),
+            last_updated: new Date().toISOString(),
+        }).eq('room_code', roomCode).catch(() => {});
     }
     gameScreen.classList.remove('active');
     winnerScreen.classList.add('active');
@@ -816,7 +863,7 @@ function showWinner(winnerIndex) {
 }
 
 function syncStateIfOnline() {
-    if (isOnline && db && roomCode) {
+    if (isOnline && supabase && roomCode) {
         updateGameStateOnline(serializeState()).catch(() => {});
     }
 }
