@@ -154,7 +154,18 @@
                             <span class="pile-count" id="pile-count">0</span>
                         </div>
                     </div>
-                    <div class="discard-pile" id="discard-pile"></div>
+                    <div class="play-area" id="play-area">
+                        <p class="play-area-label">Selected card(s)</p>
+                        <div id="pending-cards" class="pending-cards"></div>
+                        <div class="play-area-buttons">
+                            <button id="confirm-play-btn" class="btn btn-primary" style="display:none">Confirm</button>
+                            <button id="cancel-play-btn" class="btn btn-ghost-small" style="display:none">Cancel</button>
+                        </div>
+                    </div>
+                    <div class="discard-pile" id="discard-pile">
+                        <p class="discard-label">Last played</p>
+                        <div id="discard-cards" class="discard-cards"></div>
+                    </div>
                 </div>
                 
                 <div class="current-player-area">
@@ -215,6 +226,10 @@
         <a href="https://github.com/Yukkta-Seelam/Exploding-Kittens" target="_blank" rel="noopener" class="github-link">View on GitHub</a>
     </footer>
 
+    <script>
+        window.supabaseUrl = window.supabaseUrl || '';
+        window.supabaseAnonKey = window.supabaseAnonKey || '';
+    </script>
     <script src="supabase-config.js"></script>
     <script src="game.js"></script>
 </body>

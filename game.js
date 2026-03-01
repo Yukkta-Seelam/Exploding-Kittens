@@ -80,6 +80,10 @@ let roomUnsubscribe = null;
 let supabaseClient = null;
 let myPlayerIndex = 0;
 
+// Play flow: select → confirm
+let pendingCards = [];
+let catStealMode = null;
+
 function getMyUserId() {
     if (myUserId) return myUserId;
     let id = localStorage.getItem('ek_user_id');
@@ -167,6 +171,10 @@ const roomPlayersListEl = document.getElementById('room-players-list');
 const roomStartBtn = document.getElementById('room-start-btn');
 const roomStartHint = document.getElementById('room-start-hint');
 const roomLeaveBtn = document.getElementById('room-leave-btn');
+const pendingCardsEl = document.getElementById('pending-cards');
+const discardCardsEl = document.getElementById('discard-cards');
+const confirmPlayBtn = document.getElementById('confirm-play-btn');
+const cancelPlayBtn = document.getElementById('cancel-play-btn');
 
 // Player count options based on mode
 function updatePlayerCountOptions() {
@@ -214,11 +222,23 @@ function loadSupabaseScript() {
             resolve();
             return;
         }
-        const s = document.createElement('script');
-        s.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';
-        s.onload = () => resolve();
-        s.onerror = () => resolve();
-        document.head.appendChild(s);
+        const urls = [
+            'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js',
+            'https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.min.js'
+        ];
+        let idx = 0;
+        function tryLoad() {
+            const s = document.createElement('script');
+            s.src = urls[idx];
+            s.onload = () => resolve();
+            s.onerror = () => {
+                idx++;
+                if (idx < urls.length) tryLoad();
+                else resolve();
+            };
+            document.head.appendChild(s);
+        }
+        tryLoad();
     });
 }
 
@@ -235,7 +255,7 @@ function initSupabaseClient() {
 
 const hasSupabase = () => supabaseClient != null;
 
-const SUPABASE_SETUP_MSG = 'Online play needs Supabase. Add your project URL and anon key to supabase-config.js (see README). Run supabase-setup.sql in the SQL Editor, then redeploy.';
+const SUPABASE_SETUP_MSG = 'Online play needs Supabase. Add your project URL and anon key to supabase-config.js (see README). Run supabase-setup.sql in the SQL Editor, then redeploy. Make sure supabase-config.js is committed to your repo (not in .gitignore) so it deploys.';
 
 if (createGameModeSelect && createPlayerCountSelect) {
     const updateCreatePlayerCount = () => {
@@ -267,6 +287,10 @@ function generateRoomCode() {
 
 async function createRoom() {
     if (!supabaseClient) {
+        await loadSupabaseScript();
+        initSupabaseClient();
+    }
+    if (!supabaseClient) {
         alert(SUPABASE_SETUP_MSG);
         return;
     }
@@ -294,6 +318,10 @@ async function createRoom() {
 }
 
 async function joinRoom() {
+    if (!supabaseClient) {
+        await loadSupabaseScript();
+        initSupabaseClient();
+    }
     if (!supabaseClient) {
         alert(SUPABASE_SETUP_MSG);
         return;
@@ -461,6 +489,8 @@ async function startGameOnline() {
         last_updated: new Date().toISOString(),
     }).eq('room_code', roomCode);
     if (updateErr) return;
+    pendingCards = [];
+    catStealMode = null;
     showScreen('game');
     renderGame();
 }
@@ -569,6 +599,8 @@ function setupGame() {
     }
 
     gameState.drawPile = shuffle(deck);
+    pendingCards = [];
+    catStealMode = null;
     renderGame();
     lobby.classList.remove('active');
     gameScreen.classList.add('active');
@@ -599,35 +631,89 @@ function renderGame() {
     turnIndicatorEl.textContent = `${turnPlayerName}'s Turn`;
     currentPlayerLabel.textContent = isOnline ? 'Your Hand' : `${turnPlayerName}'s Hand`;
 
+    // Clear pending if not our turn (online)
+    if (isOnline && !isMyTurn) {
+        pendingCards = [];
+        catStealMode = null;
+    }
+
     // Opponents: everyone whose hand we're NOT showing (hide their cards - show ? only)
+    // In catStealMode, ALL opponent cards are clickable to pick which card to take
+    const inCatSteal = catStealMode && isMyTurn && handToShowIndex === gameState.currentPlayerIndex;
     playersAreaEl.innerHTML = '';
     for (let i = 0; i < gameState.playerCount; i++) {
         if (i === handToShowIndex) continue;
         if (gameState.players[i].eliminated) continue;
         const opp = document.createElement('div');
         opp.className = 'opponent-info';
+        const cardsHtml = gameState.players[i].hand.map((_, cardIdx) => {
+            const clickable = inCatSteal;
+            const cls = clickable ? 'opponent-card clickable' : 'opponent-card';
+            return `<div class="${cls}" data-player-index="${i}" data-card-index="${cardIdx}">?</div>`;
+        }).join('');
         opp.innerHTML = `
             <div class="opponent-name">${gameState.playerNames[i]}</div>
-            <div class="opponent-cards">
-                ${gameState.players[i].hand.map(() => '<div class="opponent-card">?</div>').join('')}
-            </div>
+            <div class="opponent-cards">${cardsHtml}</div>
         `;
+        if (inCatSteal) {
+            opp.querySelectorAll('.opponent-card.clickable').forEach(el => {
+                el.addEventListener('click', () => onCatStealCardClick(parseInt(el.dataset.playerIndex, 10), parseInt(el.dataset.cardIndex, 10)));
+            });
+        }
         playersAreaEl.appendChild(opp);
+    }
+
+    // Pending cards area: show selected card(s) before confirm
+    if (pendingCardsEl) {
+        pendingCardsEl.innerHTML = '';
+        const hand = gameState.players[handToShowIndex]?.hand || [];
+        pendingCards.forEach(pi => {
+            const card = hand[pi];
+            if (!card) return;
+            const el = createCardElement(card, pi, true);
+            el.classList.add('pending');
+            el.addEventListener('click', () => removeFromPending(pi));
+            pendingCardsEl.appendChild(el);
+        });
+    }
+
+    // Discard area: show last played cards (visible to all)
+    if (discardCardsEl) {
+        discardCardsEl.innerHTML = '';
+        const lastPlayed = gameState.discardPile.slice(-5);
+        lastPlayed.forEach(card => {
+            const el = document.createElement('div');
+            el.className = `card ${card.cssClass} card-small`;
+            el.innerHTML = `<span>${card.emoji}</span>`;
+            discardCardsEl.appendChild(el);
+        });
+    }
+
+    // Confirm / Cancel visibility
+    const hasValidPending = pendingCards.length > 0 && !inCatSteal;
+    if (confirmPlayBtn) confirmPlayBtn.style.display = hasValidPending ? 'inline-block' : 'none';
+    if (cancelPlayBtn) cancelPlayBtn.style.display = hasValidPending ? 'inline-block' : 'none';
+
+    // Cat steal hint
+    if (inCatSteal && turnIndicatorEl) {
+        turnIndicatorEl.textContent = 'Click a card to take from an opponent';
     }
 
     // Show hand (only playable when it's your turn in online mode)
     handEl.innerHTML = '';
     myHand.hand.forEach((card, idx) => {
-        let playable = canPlayCard(card, idx);
+        const inPending = pendingCards.includes(idx);
+        let playable = canPlayCard(card, idx) && !inPending;
         if (isOnline) playable = playable && isMyTurn && !myHand.eliminated;
+        if (inCatSteal) playable = false;
         const el = createCardElement(card, idx, playable);
         if (playable) {
-            el.addEventListener('click', () => playCard(idx));
+            el.addEventListener('click', () => selectCard(idx));
         }
         handEl.appendChild(el);
     });
 
-    drawBtn.disabled = !isMyTurn || myHand.eliminated;
+    drawBtn.disabled = !isMyTurn || myHand.eliminated || inCatSteal;
 }
 
 function canPlayCard(card, index) {
@@ -642,6 +728,77 @@ function canPlayCard(card, index) {
     return false;
 }
 
+function selectCard(idx) {
+    const handToShowIndex = isOnline ? myPlayerIndex : gameState.currentPlayerIndex;
+    const hand = gameState.players[handToShowIndex]?.hand || [];
+    const card = hand[idx];
+    if (!card || !canPlayCard(card, idx)) return;
+
+    if (card.type === 'action') {
+        pendingCards = [idx];
+    } else if (card.type === 'cat') {
+        const sameTypeIndices = hand.map((c, i) => (c.type === 'cat' && c.catType === card.catType) ? i : -1).filter(i => i >= 0);
+        if (pendingCards.length === 0) {
+            pendingCards = [idx];
+        } else if (pendingCards.length === 1) {
+            const firstCard = hand[pendingCards[0]];
+            if (firstCard.type === 'cat' && firstCard.catType === card.catType) {
+                pendingCards = [pendingCards[0], idx];
+            } else {
+                pendingCards = [idx];
+            }
+        } else if (pendingCards.length === 2) {
+            const firstCard = hand[pendingCards[0]];
+            if (firstCard.type === 'cat' && firstCard.catType === card.catType) return;
+            pendingCards = [idx];
+        }
+    }
+    renderGame();
+}
+
+function removeFromPending(idx) {
+    pendingCards = pendingCards.filter(i => i !== idx);
+    renderGame();
+}
+
+function cancelPlay() {
+    pendingCards = [];
+    renderGame();
+}
+
+function confirmPlay() {
+    if (pendingCards.length === 0) return;
+    const handToShowIndex = isOnline ? myPlayerIndex : gameState.currentPlayerIndex;
+    const hand = gameState.players[handToShowIndex]?.hand || [];
+    const cards = pendingCards.map(i => hand[i]).filter(Boolean);
+    if (cards.length === 0) return;
+
+    const card = cards[0];
+    if (card.type === 'cat') {
+        if (cards.length === 2) {
+            executeCatCombo(2);
+        } else if (cards.length >= 3) {
+            executeCatCombo(3);
+        }
+    } else {
+        executeActionCard(pendingCards[0]);
+    }
+}
+
+function onCatStealCardClick(targetPlayerIndex, cardIndex) {
+    if (!catStealMode) return;
+    const player = gameState.players[gameState.currentPlayerIndex];
+    const targetHand = gameState.players[targetPlayerIndex].hand;
+    if (cardIndex < 0 || cardIndex >= targetHand.length) return;
+    const taken = targetHand.splice(cardIndex, 1)[0];
+    player.hand.push(taken);
+    catStealMode = null;
+    pendingCards = [];
+    advanceTurn();
+    renderGame();
+    syncStateIfOnline();
+}
+
 // Show modal
 function showModal(title, contentHtml, onClose) {
     modalTitle.textContent = title;
@@ -654,67 +811,36 @@ function showModal(title, contentHtml, onClose) {
     modalClose.onclick = close;
 }
 
-// Play a card
-function playCard(index) {
+function executeActionCard(index) {
     const player = gameState.players[gameState.currentPlayerIndex];
     const card = player.hand[index];
+    if (!card || card.type === 'cat') return;
 
-    if (card.type === 'cat') {
-        const sameCats = player.hand.filter(c => c.type === 'cat' && c.catType === card.catType);
-        if (sameCats.length === 2) {
-            playCatCombo(2, index);
-        } else if (sameCats.length >= 3) {
-            playCatCombo(3, index);
-        }
-        return;
-    }
+    player.hand.splice(index, 1);
+    gameState.discardPile.push(card);
+    pendingCards = [];
 
     if (card.id === 'skip') {
-        player.hand.splice(index, 1);
-        gameState.discardPile.push(card);
         if (gameState.attacksPending > 0) {
             gameState.attacksPending--;
             if (gameState.attacksPending === 0) advanceTurn();
         } else {
             advanceTurn();
         }
-        renderGame();
-        syncStateIfOnline();
-        return;
-    }
-
-    if (card.id === 'attack') {
-        player.hand.splice(index, 1);
-        gameState.discardPile.push(card);
+    } else if (card.id === 'attack') {
         gameState.attacksPending = (gameState.attacksPending || 0) + 2;
         advanceTurn();
-        renderGame();
-        syncStateIfOnline();
-        return;
-    }
-
-    if (card.id === 'see_future') {
-        player.hand.splice(index, 1);
-        gameState.discardPile.push(card);
+    } else if (card.id === 'see_future') {
         const top3 = gameState.drawPile.slice(0, 3);
         const html = top3.map(c => `<div class="card ${c.cssClass}">${c.emoji} ${c.name}</div>`).join('');
         showModal('See the Future', html);
-        renderGame();
-        syncStateIfOnline();
-        return;
-    }
-
-    if (card.id === 'shuffle') {
-        player.hand.splice(index, 1);
-        gameState.discardPile.push(card);
+        advanceTurn();
+    } else if (card.id === 'shuffle') {
         gameState.drawPile = shuffle(gameState.drawPile);
         advanceTurn();
-        renderGame();
-        syncStateIfOnline();
-        return;
-    }
-
-    if (card.id === 'favor') {
+    } else if (card.id === 'nope') {
+        advanceTurn();
+    } else if (card.id === 'favor') {
         const targets = [];
         for (let i = 0; i < gameState.playerCount; i++) {
             if (i !== gameState.currentPlayerIndex && !gameState.players[i].eliminated && gameState.players[i].hand.length > 0) {
@@ -722,11 +848,7 @@ function playCard(index) {
             }
         }
         if (targets.length === 0) {
-            player.hand.splice(index, 1);
-            gameState.discardPile.push(card);
             advanceTurn();
-            renderGame();
-            syncStateIfOnline();
         } else {
             const html = targets.map(t => `<button class="btn" data-target="${t.index}">${t.name}</button>`).join('');
             showModal('Choose player to take a card from', html, () => {});
@@ -737,8 +859,6 @@ function playCard(index) {
                     const cardIdx = Math.floor(Math.random() * targetHand.length);
                     const taken = targetHand.splice(cardIdx, 1)[0];
                     player.hand.push(taken);
-                    player.hand.splice(player.hand.indexOf(card), 1);
-                    gameState.discardPile.push(card);
                     modalOverlay.classList.add('hidden');
                     advanceTurn();
                     renderGame();
@@ -746,31 +866,25 @@ function playCard(index) {
                 };
             });
         }
-        renderGame();
-        return;
     }
-
-    if (card.id === 'nope') {
-        player.hand.splice(index, 1);
-        gameState.discardPile.push(card);
-        advanceTurn();
-        renderGame();
-        syncStateIfOnline();
-        return;
-    }
+    renderGame();
+    syncStateIfOnline();
 }
 
-function playCatCombo(count, index) {
+function executeCatCombo(count) {
     const player = gameState.players[gameState.currentPlayerIndex];
-    const card = player.hand[index];
-    const sameCats = player.hand.filter(c => c.type === 'cat' && c.catType === card.catType);
-
-    const toRemove = sameCats.slice(0, count);
-    toRemove.forEach(c => {
-        const idx = player.hand.indexOf(c);
-        player.hand.splice(idx, 1);
-        gameState.discardPile.push(c);
+    const indices = [...pendingCards].sort((a, b) => a - b).reverse();
+    const toRemove = indices.slice(0, count);
+    const cardsToDiscard = [];
+    toRemove.forEach(idx => {
+        const c = player.hand[idx];
+        if (c) {
+            player.hand.splice(idx, 1);
+            cardsToDiscard.push(c);
+        }
     });
+    gameState.discardPile.push(...cardsToDiscard);
+    pendingCards = [];
 
     if (count === 2) {
         const targets = [];
@@ -780,13 +894,14 @@ function playCatCombo(count, index) {
             }
         }
         if (targets.length > 0) {
-            const target = targets[Math.floor(Math.random() * targets.length)];
-            const targetHand = gameState.players[target.index].hand;
-            const cardIdx = Math.floor(Math.random() * targetHand.length);
-            const taken = targetHand.splice(cardIdx, 1)[0];
-            player.hand.push(taken);
+            catStealMode = { waitingForCardClick: true };
+            syncStateIfOnline();
+            renderGame();
+        } else {
+            advanceTurn();
+            renderGame();
+            syncStateIfOnline();
         }
-        syncStateIfOnline();
     } else {
         showModal('Request a specific card', '<p>Pick a player to request a card from (simplified: random card taken)</p>', () => {});
         const targets = [];
@@ -810,15 +925,16 @@ function playCatCombo(count, index) {
                     modalOverlay.classList.add('hidden');
                     advanceTurn();
                     renderGame();
+                    syncStateIfOnline();
                 };
             });
         } else {
             modalContent.innerHTML = '<p>No valid targets.</p>';
             advanceTurn();
+            renderGame();
         }
+        syncStateIfOnline();
     }
-    renderGame();
-    syncStateIfOnline();
 }
 
 function advanceTurn() {
@@ -912,6 +1028,8 @@ if (drawPileEl) drawPileEl.addEventListener('click', () => {
     if (!drawBtn.disabled) drawCard();
 });
 if (drawBtn) drawBtn.addEventListener('click', drawCard);
+if (confirmPlayBtn) confirmPlayBtn.addEventListener('click', confirmPlay);
+if (cancelPlayBtn) cancelPlayBtn.addEventListener('click', cancelPlay);
 
 if (showRulesBtn) showRulesBtn.addEventListener('click', (e) => {
     e.preventDefault();
