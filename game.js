@@ -204,12 +204,16 @@ playerCountSelect.addEventListener('change', updatePlayerNameInputs);
 updatePlayerCountOptions();
 updatePlayerNameInputs();
 
-// Supabase init (optional)
-if (typeof window.supabase !== 'undefined' && window.supabaseUrl && window.supabaseAnonKey &&
-    window.supabaseUrl.includes('YOUR_PROJECT') === false && window.supabaseAnonKey.includes('YOUR_ANON') === false) {
-    try {
+// Supabase init (optional) - must not throw or buttons won't work
+try {
+    if (typeof window.supabase !== 'undefined' && typeof window.supabase.createClient === 'function' &&
+        window.supabaseUrl && window.supabaseAnonKey &&
+        String(window.supabaseUrl).includes('YOUR_PROJECT') === false &&
+        String(window.supabaseAnonKey).includes('YOUR_ANON') === false) {
         supabase = window.supabase.createClient(window.supabaseUrl, window.supabaseAnonKey);
-    } catch (e) { console.warn('Supabase init failed', e); }
+    }
+} catch (e) {
+    console.warn('Supabase init failed', e);
 }
 const hasSupabase = () => supabase != null;
 
@@ -868,10 +872,10 @@ function syncStateIfOnline() {
     }
 }
 
-// Event listeners
-startBtn.addEventListener('click', setupGame);
+// Event listeners (guard so one missing element doesn't break all)
+if (startBtn) startBtn.addEventListener('click', setupGame);
 
-backBtn.addEventListener('click', () => {
+if (backBtn) backBtn.addEventListener('click', () => {
     gameScreen.classList.remove('active');
     winnerScreen.classList.remove('active');
     if (isOnline) {
@@ -882,13 +886,12 @@ backBtn.addEventListener('click', () => {
     }
 });
 
-drawPileEl.addEventListener('click', () => {
+if (drawPileEl) drawPileEl.addEventListener('click', () => {
     if (!drawBtn.disabled) drawCard();
 });
+if (drawBtn) drawBtn.addEventListener('click', drawCard);
 
-drawBtn.addEventListener('click', drawCard);
-
-showRulesBtn.addEventListener('click', (e) => {
+if (showRulesBtn) showRulesBtn.addEventListener('click', (e) => {
     e.preventDefault();
     rulesModal.classList.remove('hidden');
 });
@@ -899,11 +902,11 @@ if (document.getElementById('show-rules-home')) {
     });
 }
 
-closeRulesBtn.addEventListener('click', () => {
+if (closeRulesBtn) closeRulesBtn.addEventListener('click', () => {
     rulesModal.classList.add('hidden');
 });
 
-playAgainBtn.addEventListener('click', () => {
+if (playAgainBtn) playAgainBtn.addEventListener('click', () => {
     winnerScreen.classList.remove('active');
     if (isOnline) {
         leaveRoom();
