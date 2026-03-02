@@ -1330,9 +1330,30 @@ function drawCard() {
             const defuseIdx = player.hand.findIndex(c => c.id === 'defuse');
             player.hand.splice(defuseIdx, 1);
             gameState.discardPile.push(CARD_TYPES.DEFUSE);
-            const pos = Math.floor(Math.random() * (gameState.drawPile.length + 1));
-            gameState.drawPile.splice(pos, 0, card);
-            advanceTurn();
+
+            // Let the player choose the position to put the Exploding Kitten back (1 = top of deck).
+            const maxPos = gameState.drawPile.length + 1;
+            let html = '<p>You defused the Exploding Kitten.</p>';
+            html += '<p>Choose the position to put it back in the draw pile (1 = top):</p>';
+            html += '<div class="defuse-positions">';
+            for (let pos = 1; pos <= maxPos; pos++) {
+                html += `<button class="btn" data-pos="${pos}">${pos}</button>`;
+            }
+            html += '</div>';
+            showModal('Place Exploding Kitten', html, () => {});
+            modalContent.querySelectorAll('[data-pos]').forEach(btn => {
+                btn.onclick = () => {
+                    const pos = parseInt(btn.dataset.pos, 10);
+                    const index = Math.min(Math.max(pos - 1, 0), gameState.drawPile.length);
+                    gameState.drawPile.splice(index, 0, card);
+                    modalOverlay.classList.add('hidden');
+                    advanceTurn();
+                    drawBtn.disabled = false;
+                    renderGame();
+                    syncStateIfOnline();
+                };
+            });
+            return;
         } else {
             player.eliminated = true;
             const alive = gameState.players.filter(p => !p.eliminated);
