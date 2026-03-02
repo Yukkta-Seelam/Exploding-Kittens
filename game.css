@@ -561,6 +561,13 @@ body {
     margin-bottom: 2rem;
 }
 
+.winner-buttons {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
 /* Footer */
 .footer {
     position: fixed;

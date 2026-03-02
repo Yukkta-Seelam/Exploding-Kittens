@@ -162,6 +162,8 @@ const showRulesBtn = document.getElementById('show-rules');
 const rulesModal = document.getElementById('rules-modal');
 const closeRulesBtn = document.getElementById('close-rules');
 const playAgainBtn = document.getElementById('play-again');
+const winnerCancelBtn = document.getElementById('winner-cancel');
+const winnerSubtitleEl = document.getElementById('winner-subtitle');
 const winnerMessage = document.getElementById('winner-message');
 const homeScreen = document.getElementById('home');
 const playLocalBtn = document.getElementById('play-local-btn');
@@ -519,6 +521,66 @@ async function updateGameStateOnline(state) {
     }).eq('room_code', roomCode);
 }
 
+async function restartGameOnline() {
+    if (!supabaseClient || !roomCode) return;
+    const { data: row, error: fetchErr } = await supabaseClient.from('rooms').select('*').eq('room_code', roomCode).single();
+    if (fetchErr || !row) return;
+    const data = mapRoomRow(row);
+    const playerNames = data.playerNames || [];
+    const playerCount = playerNames.length;
+    if (playerCount < 2) return;
+    const mode = data.gameMode || 'base';
+    gameState = {
+        players: [],
+        playerNames: playerNames,
+        drawPile: [],
+        discardPile: [],
+        currentPlayerIndex: 0,
+        direction: 1,
+        attacksPending: 0,
+        playerCount,
+        gameMode: mode,
+        pendingNope: null,
+        lastEliminatedPlayerIndex: null,
+    };
+    let deck = mode === 'party' ? createPartyDeck(playerCount) : [...BASE_DECK];
+    deck = deck.filter(c => c.id !== 'exploding' && c.id !== 'defuse');
+    for (let i = 0; i < playerCount; i++) {
+        gameState.players.push({ hand: [CARD_TYPES.DEFUSE], eliminated: false });
+    }
+    const cardsPerPlayer = 7;
+    for (let i = 0; i < playerCount; i++) {
+        for (let j = 1; j < cardsPerPlayer; j++) {
+            if (deck.length > 0) {
+                const idx = Math.floor(Math.random() * deck.length);
+                gameState.players[i].hand.push(deck.splice(idx, 1)[0]);
+            }
+        }
+    }
+    const defuseCount = Math.min(6, playerCount + 2);
+    const defusesForDeck = mode === 'party' ? Math.min(10, defuseCount - playerCount) : (playerCount >= 4 ? 4 : 2);
+    for (let i = 0; i < defusesForDeck && deck.length > 0; i++) {
+        const idx = Math.floor(Math.random() * deck.length);
+        deck.splice(idx, 0, CARD_TYPES.DEFUSE);
+    }
+    const explodingCount = playerCount - 1;
+    for (let i = 0; i < explodingCount; i++) deck.push(CARD_TYPES.EXPLODING);
+    gameState.drawPile = shuffle(deck);
+    const { error: updateErr } = await supabaseClient.from('rooms').update({
+        status: 'playing',
+        game_state: serializeState(),
+        last_updated: new Date().toISOString(),
+    }).eq('room_code', roomCode);
+    if (updateErr) return;
+    pendingCards = [];
+    catStealMode = null;
+    pickFromDiscardMode = null;
+    lastShownElimination = -1;
+    winnerScreen.classList.remove('active');
+    showScreen('game');
+    renderGame();
+}
+
 function leaveRoom() {
     if (roomUnsubscribe) {
         roomUnsubscribe.unsubscribe();
@@ -625,6 +687,53 @@ function setupGame() {
     renderGame();
     lobby.classList.remove('active');
     gameScreen.classList.add('active');
+}
+
+function setupGameFromState(names, playerCount, mode) {
+    gameState = {
+        players: [],
+        playerNames: names.slice(0, playerCount),
+        drawPile: [],
+        discardPile: [],
+        currentPlayerIndex: 0,
+        direction: 1,
+        attacksPending: 0,
+        playerCount,
+        gameMode: mode,
+        pendingNope: null,
+        lastEliminatedPlayerIndex: null,
+    };
+    let deck = mode === 'party' ? createPartyDeck(playerCount) : [...BASE_DECK];
+    deck = deck.filter(c => c.id !== 'exploding' && c.id !== 'defuse');
+    const defuseCount = Math.min(6, playerCount + 2);
+    for (let i = 0; i < playerCount; i++) {
+        gameState.players.push({ hand: [CARD_TYPES.DEFUSE], eliminated: false });
+    }
+    const cardsPerPlayer = 7;
+    for (let i = 0; i < playerCount; i++) {
+        for (let j = 1; j < cardsPerPlayer; j++) {
+            if (deck.length > 0) {
+                const idx = Math.floor(Math.random() * deck.length);
+                gameState.players[i].hand.push(deck.splice(idx, 1)[0]);
+            }
+        }
+    }
+    const defusesForDeck = mode === 'party' ? Math.min(10, defuseCount - playerCount) : (playerCount >= 4 ? 4 : 2);
+    for (let i = 0; i < defusesForDeck && deck.length > 0; i++) {
+        const idx = Math.floor(Math.random() * deck.length);
+        deck.splice(idx, 0, CARD_TYPES.DEFUSE);
+    }
+    const explodingCount = playerCount - 1;
+    for (let i = 0; i < explodingCount; i++) deck.push(CARD_TYPES.EXPLODING);
+    gameState.drawPile = shuffle(deck);
+    gameState.lastEliminatedPlayerIndex = null;
+    pendingCards = [];
+    catStealMode = null;
+    pickFromDiscardMode = null;
+    lastShownElimination = -1;
+    lobby.classList.remove('active');
+    gameScreen.classList.add('active');
+    renderGame();
 }
 
 // Get next alive player
@@ -1401,6 +1510,7 @@ function drawCard() {
 
 function showWinner(winnerIndex) {
     gameState.winnerIndex = winnerIndex;
+    const winnerName = gameState.playerNames[winnerIndex];
     if (isOnline && supabaseClient && roomCode) {
         supabaseClient.from('rooms').update({
             status: 'ended',
@@ -1410,7 +1520,8 @@ function showWinner(winnerIndex) {
     }
     gameScreen.classList.remove('active');
     winnerScreen.classList.add('active');
-    winnerMessage.textContent = `${gameState.playerNames[winnerIndex]} Wins! 🎉`;
+    winnerMessage.textContent = `🎉 ${winnerName} Wins! 🏆`;
+    if (winnerSubtitleEl) winnerSubtitleEl.textContent = 'They avoided all the Exploding Kittens! 🐱💥';
 }
 
 function syncStateIfOnline() {
@@ -1458,10 +1569,18 @@ if (closeRulesBtn) closeRulesBtn.addEventListener('click', () => {
 if (playAgainBtn) playAgainBtn.addEventListener('click', () => {
     winnerScreen.classList.remove('active');
     if (isOnline) {
+        restartGameOnline();
+    } else {
+        setupGameFromState(gameState.playerNames, gameState.playerCount, gameState.gameMode);
+    }
+});
+
+if (winnerCancelBtn) winnerCancelBtn.addEventListener('click', () => {
+    winnerScreen.classList.remove('active');
+    if (isOnline) {
         leaveRoom();
     } else {
-        lobby.classList.add('active');
-        showScreen('lobby');
+        showScreen('home');
     }
 });
 
