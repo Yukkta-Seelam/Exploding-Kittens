@@ -73,7 +73,8 @@ let gameState = {
     attacksPending: 0,
     playerCount: 2,
     gameMode: 'base',
-    pendingNope: null, // { actingPlayerIndex, effectType, cardName, emoji, parity } when waiting for Nopes (local + online)
+    pendingNope: null,
+    lastEliminatedPlayerIndex: null, // Show "[Name] is out!" popup to all players
 };
 
 // Online state (Supabase)
@@ -88,6 +89,7 @@ let myPlayerIndex = 0;
 let pendingCards = [];
 let catStealMode = null;
 let pickFromDiscardMode = null;
+let lastShownElimination = -1;
 
 function getMyUserId() {
     if (myUserId) return myUserId;
@@ -113,6 +115,7 @@ function serializeState() {
         eliminated: gameState.players.map(p => p.eliminated),
         winnerIndex: gameState.winnerIndex ?? null,
         pendingNope: gameState.pendingNope,
+        lastEliminatedPlayerIndex: gameState.lastEliminatedPlayerIndex,
     };
 }
 function deserializeState(data, playerNames) {
@@ -129,6 +132,7 @@ function deserializeState(data, playerNames) {
     gameState.attacksPending = data.attacksPending ?? 0;
     gameState.winnerIndex = data.winnerIndex ?? null;
     gameState.pendingNope = data.pendingNope ?? null;
+    gameState.lastEliminatedPlayerIndex = data.lastEliminatedPlayerIndex ?? null;
 }
 
 // DOM refs
@@ -146,6 +150,8 @@ const pileCountEl = document.getElementById('pile-count');
 const handEl = document.getElementById('hand');
 const playersAreaEl = document.getElementById('players-area');
 const turnIndicatorEl = document.getElementById('turn-indicator');
+const turnBannerEl = document.getElementById('turn-banner');
+const turnBannerNameEl = document.getElementById('turn-banner-name');
 const currentPlayerLabel = document.getElementById('current-player-label');
 const modalOverlay = document.getElementById('modal-overlay');
 const modal = document.getElementById('modal');
@@ -467,6 +473,7 @@ async function startGameOnline() {
         playerCount,
         gameMode: mode,
         pendingNope: null,
+        lastEliminatedPlayerIndex: null,
     };
     let deck = mode === 'party' ? createPartyDeck(playerCount) : [...BASE_DECK];
     deck = deck.filter(c => c.id !== 'exploding' && c.id !== 'defuse');
@@ -569,6 +576,7 @@ function setupGame() {
         playerCount,
         gameMode: mode,
         pendingNope: null,
+        lastEliminatedPlayerIndex: null,
     };
 
     // Build deck
@@ -609,9 +617,11 @@ function setupGame() {
     }
 
     gameState.drawPile = shuffle(deck);
+    gameState.lastEliminatedPlayerIndex = null;
     pendingCards = [];
     catStealMode = null;
     pickFromDiscardMode = null;
+    lastShownElimination = -1;
     renderGame();
     lobby.classList.remove('active');
     gameScreen.classList.add('active');
@@ -630,6 +640,13 @@ function getNextPlayer(fromIndex) {
 
 // Render game UI
 function renderGame() {
+    // Show "[Player] is out!" popup when someone is eliminated (all players see it)
+    if (gameState.lastEliminatedPlayerIndex != null && gameState.lastEliminatedPlayerIndex !== lastShownElimination) {
+        lastShownElimination = gameState.lastEliminatedPlayerIndex;
+        const name = gameState.playerNames[gameState.lastEliminatedPlayerIndex];
+        showModal('Player Eliminated', `<p class="eliminated-msg">${name} is out!</p>`, () => {});
+    }
+
     pileCountEl.textContent = gameState.drawPile.length;
     const turnPlayerIndex = gameState.currentPlayerIndex;
     const turnPlayerName = gameState.playerNames[turnPlayerIndex];
@@ -640,6 +657,9 @@ function renderGame() {
     const myHand = gameState.players[handToShowIndex];
 
     turnIndicatorEl.textContent = `${turnPlayerName}'s Turn`;
+    if (turnBannerEl && turnBannerNameEl) {
+        turnBannerNameEl.textContent = turnPlayerName;
+    }
     currentPlayerLabel.textContent = isOnline ? 'Your Hand' : `${turnPlayerName}'s Hand`;
 
     // Clear pending if not our turn (online)
@@ -717,8 +737,12 @@ function renderGame() {
     // Cat steal / pick from discard hints
     if (inCatSteal && turnIndicatorEl) {
         turnIndicatorEl.textContent = 'Click a card to take from an opponent';
+        if (turnBannerNameEl) turnBannerNameEl.textContent = turnPlayerName;
     } else if (inPickFromDiscard && turnIndicatorEl) {
         turnIndicatorEl.textContent = 'Click a card in the discard pile to take it';
+        if (turnBannerNameEl) turnBannerNameEl.textContent = turnPlayerName;
+    } else if (turnBannerNameEl) {
+        turnBannerNameEl.textContent = turnPlayerName;
     }
 
     // Show hand (only playable when it's your turn in online mode)
@@ -1356,6 +1380,7 @@ function drawCard() {
             return;
         } else {
             player.eliminated = true;
+            gameState.lastEliminatedPlayerIndex = gameState.currentPlayerIndex;
             const alive = gameState.players.filter(p => !p.eliminated);
             if (alive.length === 1) {
                 const winnerIdx = gameState.players.findIndex(p => !p.eliminated);
