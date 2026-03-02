@@ -568,6 +568,26 @@ body {
     flex-wrap: wrap;
 }
 
+.spectator-msg {
+    color: var(--text-muted);
+    font-size: 1rem;
+    padding: 1rem;
+    text-align: center;
+}
+
+.opponent-cards.spectator-cards {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    justify-content: center;
+}
+
+.opponent-cards.spectator-cards .card-small {
+    width: 48px;
+    height: 68px;
+    font-size: 0.65rem;
+}
+
 /* Footer */
 .footer {
     position: fixed;

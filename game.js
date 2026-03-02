@@ -749,6 +749,22 @@ function getNextPlayer(fromIndex) {
 
 // Render game UI
 function renderGame() {
+    // If exactly one player left and we haven't set winner yet, set it and show winner (safety net for all code paths)
+    const alive = gameState.players.filter(p => !p.eliminated);
+    if (alive.length === 1 && gameState.winnerIndex == null) {
+        gameState.winnerIndex = gameState.players.findIndex(p => !p.eliminated);
+        showWinner(gameState.winnerIndex);
+        if (isOnline && supabaseClient && roomCode) {
+            supabaseClient.from('rooms').update({
+                status: 'ended',
+                game_state: serializeState(),
+                last_updated: new Date().toISOString(),
+            }).eq('room_code', roomCode).catch(() => {});
+        }
+        return;
+    }
+    if (gameState.winnerIndex != null) return;
+
     // Show "[Player] is out!" popup when someone is eliminated (all players see it)
     if (gameState.lastEliminatedPlayerIndex != null && gameState.lastEliminatedPlayerIndex !== lastShownElimination) {
         lastShownElimination = gameState.lastEliminatedPlayerIndex;
@@ -761,15 +777,22 @@ function renderGame() {
     const turnPlayerName = gameState.playerNames[turnPlayerIndex];
     const isMyTurn = !isOnline || (myPlayerIndex === turnPlayerIndex);
 
-    // In online mode: each player sees only THEIR hand. In local mode: show current turn player's hand.
-    const handToShowIndex = isOnline ? myPlayerIndex : turnPlayerIndex;
+    // Spectator: eliminated player (online) sees all remaining players' hands and full game state
+    const isSpectator = isOnline && gameState.players[myPlayerIndex] && gameState.players[myPlayerIndex].eliminated;
+
+    // In online mode: each player sees only THEIR hand (or spectator view). In local mode: show current turn player's hand.
+    const handToShowIndex = isSpectator ? turnPlayerIndex : (isOnline ? myPlayerIndex : turnPlayerIndex);
     const myHand = gameState.players[handToShowIndex];
 
     turnIndicatorEl.textContent = `${turnPlayerName}'s Turn`;
     if (turnBannerEl && turnBannerNameEl) {
         turnBannerNameEl.textContent = turnPlayerName;
     }
-    currentPlayerLabel.textContent = isOnline ? 'Your Hand' : `${turnPlayerName}'s Hand`;
+    if (isSpectator) {
+        currentPlayerLabel.textContent = "You're out! Spectating";
+    } else {
+        currentPlayerLabel.textContent = isOnline ? 'Your Hand' : `${turnPlayerName}'s Hand`;
+    }
 
     // Clear pending if not our turn (online)
     if (isOnline && !isMyTurn) {
@@ -784,20 +807,23 @@ function renderGame() {
     const inCatSteal = catStealMode && isMyTurn && handToShowIndex === gameState.currentPlayerIndex;
     playersAreaEl.innerHTML = '';
     for (let i = 0; i < gameState.playerCount; i++) {
-        if (i === handToShowIndex) continue;
+        if (i === handToShowIndex && !isSpectator) continue;
         if (gameState.players[i].eliminated) continue;
         const opp = document.createElement('div');
         opp.className = 'opponent-info';
-        const cardsHtml = gameState.players[i].hand.map((_, cardIdx) => {
-            const clickable = inCatSteal;
-            const cls = clickable ? 'opponent-card clickable' : 'opponent-card';
-            return `<div class="${cls}" data-player-index="${i}" data-card-index="${cardIdx}">?</div>`;
-        }).join('');
+        const showCards = isSpectator;
+        const cardsHtml = showCards
+            ? gameState.players[i].hand.map(c => `<div class="card ${c.cssClass} card-small">${c.emoji} ${c.name}</div>`).join('')
+            : gameState.players[i].hand.map((_, cardIdx) => {
+                const clickable = inCatSteal;
+                const cls = clickable ? 'opponent-card clickable' : 'opponent-card';
+                return `<div class="${cls}" data-player-index="${i}" data-card-index="${cardIdx}">?</div>`;
+            }).join('');
         opp.innerHTML = `
-            <div class="opponent-name">${gameState.playerNames[i]}</div>
-            <div class="opponent-cards">${cardsHtml}</div>
+            <div class="opponent-name">${gameState.playerNames[i]}${showCards ? ' (visible)' : ''}</div>
+            <div class="opponent-cards ${showCards ? 'spectator-cards' : ''}">${cardsHtml}</div>
         `;
-        if (inCatSteal) {
+        if (!showCards && inCatSteal) {
             opp.querySelectorAll('.opponent-card.clickable').forEach(el => {
                 el.addEventListener('click', () => onCatStealCardClick(parseInt(el.dataset.playerIndex, 10), parseInt(el.dataset.cardIndex, 10)));
             });
@@ -854,21 +880,25 @@ function renderGame() {
         turnBannerNameEl.textContent = turnPlayerName;
     }
 
-    // Show hand (only playable when it's your turn in online mode)
+    // Show hand (only playable when it's your turn in online mode). Spectators see message only.
     handEl.innerHTML = '';
-    myHand.hand.forEach((card, idx) => {
-        const inPending = pendingCards.includes(idx);
-        let playable = canPlayCard(card, idx) && !inPending;
-        if (isOnline) playable = playable && isMyTurn && !myHand.eliminated;
-        if (inCatSteal || inPickFromDiscard) playable = false;
-        const el = createCardElement(card, idx, playable);
-        if (playable) {
-            el.addEventListener('click', () => selectCard(idx));
-        }
-        handEl.appendChild(el);
-    });
+    if (isSpectator) {
+        handEl.innerHTML = '<p class="spectator-msg">You\'re out! Watch the remaining players above. Draw pile and last played cards are shown in the center.</p>';
+    } else {
+        myHand.hand.forEach((card, idx) => {
+            const inPending = pendingCards.includes(idx);
+            let playable = canPlayCard(card, idx) && !inPending;
+            if (isOnline) playable = playable && isMyTurn && !myHand.eliminated;
+            if (inCatSteal || inPickFromDiscard) playable = false;
+            const el = createCardElement(card, idx, playable);
+            if (playable) {
+                el.addEventListener('click', () => selectCard(idx));
+            }
+            handEl.appendChild(el);
+        });
+    }
 
-    drawBtn.disabled = !isMyTurn || myHand.eliminated || inCatSteal || inPickFromDiscard;
+    drawBtn.disabled = isSpectator || !isMyTurn || (myHand && myHand.eliminated) || inCatSteal || inPickFromDiscard;
 }
 
 function canPlayCard(card, index) {
