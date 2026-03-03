@@ -229,6 +229,12 @@ body {
     color: var(--danger);
 }
 
+.winner-popup-msg {
+    font-size: 1.35rem;
+    color: var(--text-dark);
+    margin: 0.5rem 0;
+}
+
 .game-header {
     display: flex;
     align-items: center;
