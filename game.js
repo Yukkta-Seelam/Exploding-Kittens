@@ -429,8 +429,12 @@ function subscribeToRoom() {
             if (data.gameState.winnerIndex != null) {
                 showWinner(data.gameState.winnerIndex);
             } else {
-                showScreen('game');
-                renderGame();
+                // Don't switch back to game if we're already on winner screen (e.g. we just ended the game locally and a stale "playing" event arrived)
+                const winnerScreenActive = winnerScreen && winnerScreen.classList.contains('active');
+                if (!winnerScreenActive) {
+                    showScreen('game');
+                    renderGame();
+                }
             }
         } else if (data.status === 'ended' && data.gameState && data.gameState.winnerIndex != null) {
             gameState.playerNames = data.playerNames || [];
@@ -1525,15 +1529,22 @@ function drawCard() {
             });
             return;
         } else {
-            // No defuse: this player is eliminated. Last player remaining wins.
+            // No defuse: this player is eliminated. Last player remaining wins — show game over immediately.
             player.eliminated = true;
             gameState.lastEliminatedPlayerIndex = gameState.currentPlayerIndex;
             const alive = gameState.players.filter(p => !p.eliminated);
             if (alive.length === 1) {
                 const winnerIdx = gameState.players.findIndex(p => !p.eliminated);
                 gameState.winnerIndex = winnerIdx;
-                syncStateIfOnline(); // persist elimination + winner before showing UI
                 showWinner(winnerIdx);
+                syncStateIfOnline();
+                if (isOnline && supabaseClient && roomCode) {
+                    supabaseClient.from('rooms').update({
+                        status: 'ended',
+                        game_state: serializeState(),
+                        last_updated: new Date().toISOString(),
+                    }).eq('room_code', roomCode).catch(() => {});
+                }
                 return;
             }
             advanceTurn();
@@ -1550,19 +1561,12 @@ function drawCard() {
 function showWinner(winnerIndex) {
     gameState.winnerIndex = winnerIndex;
     const winnerName = gameState.playerNames[winnerIndex];
-    if (isOnline && supabaseClient && roomCode) {
-        supabaseClient.from('rooms').update({
-            status: 'ended',
-            game_state: serializeState(),
-            last_updated: new Date().toISOString(),
-        }).eq('room_code', roomCode).catch(() => {});
-    }
-    // Show winner immediately: game over, last player remaining won
+    // Update DOM and switch to winner screen first so the losing player always sees "Game Over" immediately
     if (winnerMessage) winnerMessage.textContent = `🎉 ${winnerName} Wins! 🏆`;
     if (winnerSubtitleEl) winnerSubtitleEl.textContent = 'They avoided all the Exploding Kittens! 🐱💥';
     if (modalOverlay) modalOverlay.classList.add('hidden');
-    // Use showScreen so all other screens are deactivated and winner is the only active screen
-    showScreen('winner');
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    if (winnerScreen) winnerScreen.classList.add('active');
 }
 
 function syncStateIfOnline() {
