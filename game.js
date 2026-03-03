@@ -788,7 +788,7 @@ function renderGame() {
     const turnPlayerName = gameState.playerNames[turnPlayerIndex];
     const isMyTurn = !isOnline || (myPlayerIndex === turnPlayerIndex);
 
-    // Spectator: eliminated player (online) sees all remaining players' hands and full game state
+    // Spectator: eliminated player (online) sees all players' hands and full game state
     const isSpectator = isOnline && gameState.players[myPlayerIndex] && gameState.players[myPlayerIndex].eliminated;
 
     // In online mode: each player sees only THEIR hand (or spectator view). In local mode: show current turn player's hand.
@@ -819,19 +819,22 @@ function renderGame() {
     playersAreaEl.innerHTML = '';
     for (let i = 0; i < gameState.playerCount; i++) {
         if (i === handToShowIndex && !isSpectator) continue;
-        if (gameState.players[i].eliminated) continue;
+        const isOut = !!gameState.players[i].eliminated;
+        if (isOut && !isSpectator) continue;
         const opp = document.createElement('div');
-        opp.className = 'opponent-info';
+        opp.className = `opponent-info${isOut ? ' eliminated' : ''}`;
         const showCards = isSpectator;
         const cardsHtml = showCards
-            ? gameState.players[i].hand.map(c => `<div class="card ${c.cssClass} card-small">${c.emoji} ${c.name}</div>`).join('')
+            ? (gameState.players[i].hand.length
+                ? gameState.players[i].hand.map(c => `<div class="card ${c.cssClass} card-small">${c.emoji} ${c.name}</div>`).join('')
+                : `<div class="opponent-empty">(no cards)</div>`)
             : gameState.players[i].hand.map((_, cardIdx) => {
                 const clickable = inCatSteal;
                 const cls = clickable ? 'opponent-card clickable' : 'opponent-card';
                 return `<div class="${cls}" data-player-index="${i}" data-card-index="${cardIdx}">?</div>`;
             }).join('');
         opp.innerHTML = `
-            <div class="opponent-name">${gameState.playerNames[i]}${showCards ? ' (visible)' : ''}</div>
+            <div class="opponent-name">${gameState.playerNames[i]}${isOut ? ' (out)' : ''}${showCards ? ' (visible)' : ''}</div>
             <div class="opponent-cards ${showCards ? 'spectator-cards' : ''}">${cardsHtml}</div>
         `;
         if (!showCards && inCatSteal) {
