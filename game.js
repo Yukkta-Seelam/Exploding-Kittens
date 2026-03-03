@@ -1555,19 +1555,12 @@ function showWinner(winnerIndex) {
             last_updated: new Date().toISOString(),
         }).eq('room_code', roomCode).catch(() => {});
     }
+    // Show winner immediately so the losing player and everyone else always see who won
     winnerMessage.textContent = `🎉 ${winnerName} Wins! 🏆`;
     if (winnerSubtitleEl) winnerSubtitleEl.textContent = 'They avoided all the Exploding Kittens! 🐱💥';
-
-    // Popup for all n players (including spectators): "[Name] is the winner"
-    const popupHtml = `<p class="winner-popup-msg">🎉 <strong>${winnerName}</strong> is the winner! 🏆</p>`;
-    showModal('Game Over', popupHtml, () => {});
-    const goToWinnerScreen = () => {
-        modalOverlay.classList.add('hidden');
-        gameScreen.classList.remove('active');
-        winnerScreen.classList.add('active');
-    };
-    modalClose.onclick = goToWinnerScreen;
-    modalClose.textContent = 'Continue';
+    modalOverlay.classList.add('hidden');
+    gameScreen.classList.remove('active');
+    winnerScreen.classList.add('active');
 }
 
 function syncStateIfOnline() {
