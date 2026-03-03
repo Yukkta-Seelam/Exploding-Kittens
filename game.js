@@ -415,11 +415,20 @@ function subscribeToRoom() {
         const data = mapRoomRow(row);
         if (!data) return;
         if (data.status === 'lobby') {
+            // Ensure everyone is brought back to the room lobby (e.g. after a rematch request).
+            showScreen('room-lobby');
             displayPartyCodeEl.textContent = roomCode;
             roomPlayersListEl.innerHTML = (data.playerNames || []).map((n) => `<li>${n}</li>`).join('');
             const isHost = data.hostId === getMyUserId();
             roomStartBtn.disabled = !isHost || (data.playerIds || []).length < 2;
-            roomStartHint.textContent = (data.playerIds || []).length < 2 ? 'Need at least 2 players to start' : (isHost ? 'Click Start when everyone has joined' : 'Waiting for host to start');
+            const isRematchLobby = !!(data.gameState && data.gameState.rematch && data.gameState.rematch.requestedAt);
+            if ((data.playerIds || []).length < 2) {
+                roomStartHint.textContent = isRematchLobby ? 'Rematch lobby: waiting for players to join...' : 'Need at least 2 players to start';
+            } else {
+                roomStartHint.textContent = isRematchLobby
+                    ? (isHost ? 'Rematch lobby: waiting for everyone. Click Start when ready.' : 'Rematch lobby: waiting for host to start.')
+                    : (isHost ? 'Click Start when everyone has joined' : 'Waiting for host to start');
+            }
         } else if (data.status === 'playing' && data.gameState) {
             gameState.playerNames = data.playerNames || [];
             gameState.playerCount = gameState.playerNames.length;
@@ -448,11 +457,19 @@ function subscribeToRoom() {
         if (row) {
             const data = mapRoomRow(row);
             if (data.status === 'lobby') {
+                showScreen('room-lobby');
                 displayPartyCodeEl.textContent = roomCode;
                 roomPlayersListEl.innerHTML = (data.playerNames || []).map((n) => `<li>${n}</li>`).join('');
                 const isHost = data.hostId === getMyUserId();
                 roomStartBtn.disabled = !isHost || (data.playerIds || []).length < 2;
-                roomStartHint.textContent = (data.playerIds || []).length < 2 ? 'Need at least 2 players to start' : (isHost ? 'Click Start when everyone has joined' : 'Waiting for host to start');
+                const isRematchLobby = !!(data.gameState && data.gameState.rematch && data.gameState.rematch.requestedAt);
+                if ((data.playerIds || []).length < 2) {
+                    roomStartHint.textContent = isRematchLobby ? 'Rematch lobby: waiting for players to join...' : 'Need at least 2 players to start';
+                } else {
+                    roomStartHint.textContent = isRematchLobby
+                        ? (isHost ? 'Rematch lobby: waiting for everyone. Click Start when ready.' : 'Rematch lobby: waiting for host to start.')
+                        : (isHost ? 'Click Start when everyone has joined' : 'Waiting for host to start');
+                }
             }
         }
     });
@@ -526,63 +543,16 @@ async function updateGameStateOnline(state) {
 }
 
 async function restartGameOnline() {
+    // Rematch flow: go back to lobby and wait; host will press Start when everyone has joined.
     if (!supabaseClient || !roomCode) return;
-    const { data: row, error: fetchErr } = await supabaseClient.from('rooms').select('*').eq('room_code', roomCode).single();
-    if (fetchErr || !row) return;
-    const data = mapRoomRow(row);
-    const playerNames = data.playerNames || [];
-    const playerCount = playerNames.length;
-    if (playerCount < 2) return;
-    const mode = data.gameMode || 'base';
-    gameState = {
-        players: [],
-        playerNames: playerNames,
-        drawPile: [],
-        discardPile: [],
-        currentPlayerIndex: 0,
-        direction: 1,
-        attacksPending: 0,
-        playerCount,
-        gameMode: mode,
-        pendingNope: null,
-        lastEliminatedPlayerIndex: null,
-    };
-    let deck = mode === 'party' ? createPartyDeck(playerCount) : [...BASE_DECK];
-    deck = deck.filter(c => c.id !== 'exploding' && c.id !== 'defuse');
-    for (let i = 0; i < playerCount; i++) {
-        gameState.players.push({ hand: [CARD_TYPES.DEFUSE], eliminated: false });
-    }
-    const cardsPerPlayer = 7;
-    for (let i = 0; i < playerCount; i++) {
-        for (let j = 1; j < cardsPerPlayer; j++) {
-            if (deck.length > 0) {
-                const idx = Math.floor(Math.random() * deck.length);
-                gameState.players[i].hand.push(deck.splice(idx, 1)[0]);
-            }
-        }
-    }
-    const defuseCount = Math.min(6, playerCount + 2);
-    const defusesForDeck = mode === 'party' ? Math.min(10, defuseCount - playerCount) : (playerCount >= 4 ? 4 : 2);
-    for (let i = 0; i < defusesForDeck && deck.length > 0; i++) {
-        const idx = Math.floor(Math.random() * deck.length);
-        deck.splice(idx, 0, CARD_TYPES.DEFUSE);
-    }
-    const explodingCount = playerCount - 1;
-    for (let i = 0; i < explodingCount; i++) deck.push(CARD_TYPES.EXPLODING);
-    gameState.drawPile = shuffle(deck);
-    const { error: updateErr } = await supabaseClient.from('rooms').update({
-        status: 'playing',
-        game_state: serializeState(),
+    showScreen('room-lobby');
+    if (roomStartHint) roomStartHint.textContent = 'Rematch lobby: waiting for other players to join...';
+    const rematchState = { rematch: { requestedAt: new Date().toISOString() } };
+    await supabaseClient.from('rooms').update({
+        status: 'lobby',
+        game_state: rematchState,
         last_updated: new Date().toISOString(),
     }).eq('room_code', roomCode);
-    if (updateErr) return;
-    pendingCards = [];
-    catStealMode = null;
-    pickFromDiscardMode = null;
-    lastShownElimination = -1;
-    winnerScreen.classList.remove('active');
-    showScreen('game');
-    renderGame();
 }
 
 function leaveRoom() {
