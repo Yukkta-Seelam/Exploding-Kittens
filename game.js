@@ -763,13 +763,20 @@ function renderGame() {
         }
         return;
     }
-    if (gameState.winnerIndex != null) return;
+    // If winner is already set (e.g. from sync), show winner screen so everyone sees who won
+    if (gameState.winnerIndex != null) {
+        showWinner(gameState.winnerIndex);
+        return;
+    }
 
-    // Show "[Player] is out!" popup when someone is eliminated (all players see it)
+    // Show "[Player] is out!" popup only when someone is eliminated AND more than one player still in the game
     if (gameState.lastEliminatedPlayerIndex != null && gameState.lastEliminatedPlayerIndex !== lastShownElimination) {
-        lastShownElimination = gameState.lastEliminatedPlayerIndex;
-        const name = gameState.playerNames[gameState.lastEliminatedPlayerIndex];
-        showModal('Player Eliminated', `<p class="eliminated-msg">${name} is out!</p>`, () => {});
+        const stillAlive = gameState.players.filter(p => !p.eliminated).length;
+        if (stillAlive > 1) {
+            lastShownElimination = gameState.lastEliminatedPlayerIndex;
+            const name = gameState.playerNames[gameState.lastEliminatedPlayerIndex];
+            showModal('Player Eliminated', `<p class="eliminated-msg">${name} is out!</p>`, () => {});
+        }
     }
 
     pileCountEl.textContent = gameState.drawPile.length;
