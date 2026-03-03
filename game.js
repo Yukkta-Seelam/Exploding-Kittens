@@ -1525,12 +1525,14 @@ function drawCard() {
             });
             return;
         } else {
+            // No defuse: this player is eliminated. Last player remaining wins.
             player.eliminated = true;
             gameState.lastEliminatedPlayerIndex = gameState.currentPlayerIndex;
             const alive = gameState.players.filter(p => !p.eliminated);
             if (alive.length === 1) {
                 const winnerIdx = gameState.players.findIndex(p => !p.eliminated);
                 gameState.winnerIndex = winnerIdx;
+                syncStateIfOnline(); // persist elimination + winner before showing UI
                 showWinner(winnerIdx);
                 return;
             }
@@ -1555,12 +1557,12 @@ function showWinner(winnerIndex) {
             last_updated: new Date().toISOString(),
         }).eq('room_code', roomCode).catch(() => {});
     }
-    // Show winner immediately so the losing player and everyone else always see who won
-    winnerMessage.textContent = `🎉 ${winnerName} Wins! 🏆`;
+    // Show winner immediately: game over, last player remaining won
+    if (winnerMessage) winnerMessage.textContent = `🎉 ${winnerName} Wins! 🏆`;
     if (winnerSubtitleEl) winnerSubtitleEl.textContent = 'They avoided all the Exploding Kittens! 🐱💥';
-    modalOverlay.classList.add('hidden');
-    gameScreen.classList.remove('active');
-    winnerScreen.classList.add('active');
+    if (modalOverlay) modalOverlay.classList.add('hidden');
+    // Use showScreen so all other screens are deactivated and winner is the only active screen
+    showScreen('winner');
 }
 
 function syncStateIfOnline() {
