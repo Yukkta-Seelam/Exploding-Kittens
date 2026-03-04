@@ -600,7 +600,8 @@ function getCardInnerHtml(card, small = false) {
 
 function createCardElement(card, index, playable = false) {
     const el = document.createElement('div');
-    el.className = `card ${card.cssClass} ${!playable ? 'disabled' : ''}`;
+    const hasImage = !!card.imageSrc;
+    el.className = `card ${card.cssClass} ${hasImage ? 'has-image' : ''} ${!playable ? 'disabled' : ''}`;
     el.dataset.index = index;
     el.innerHTML = getCardInnerHtml(card, false);
     return el;
@@ -809,7 +810,8 @@ function renderGame() {
             ? (gameState.players[i].hand.length
                 ? gameState.players[i].hand.map(c => {
                     const inner = getCardInnerHtml(c, true);
-                    return `<div class="card ${c.cssClass} card-small">${inner}</div>`;
+                    const hasImage = c.imageSrc ? ' has-image' : '';
+                    return `<div class="card ${c.cssClass} card-small${hasImage}">${inner}</div>`;
                 }).join('')
                 : `<div class="opponent-empty">(no cards)</div>`)
             : gameState.players[i].hand.map((_, cardIdx) => {
@@ -852,7 +854,8 @@ function renderGame() {
         slice.forEach((card, i) => {
             const actualIndex = start + i;
             const el = document.createElement('div');
-            el.className = `card ${card.cssClass} card-small ${inPickFromDiscard ? 'clickable' : ''}`;
+            const hasImage = card.imageSrc ? ' has-image' : '';
+            el.className = `card ${card.cssClass} card-small${hasImage} ${inPickFromDiscard ? 'clickable' : ''}`;
             el.innerHTML = getCardInnerHtml(card, true);
             if (inPickFromDiscard) {
                 el.dataset.discardIndex = actualIndex;
