@@ -5,19 +5,19 @@
 
 // Card definitions
 const CARD_TYPES = {
-    EXPLODING: { id: 'exploding', name: 'Exploding Kitten', type: 'exploding', cssClass: 'card-exploding', emoji: '💥', imageSrc: 'assets/cards/exploding.jpeg' },
+    EXPLODING: { id: 'exploding', name: 'Exploding Kitten', type: 'exploding', cssClass: 'card-exploding', emoji: '💥', imageSrc: 'assets/cards/explodingkitten.jpeg' },
     DEFUSE: { id: 'defuse', name: 'Defuse', type: 'defuse', cssClass: 'card-defuse', emoji: '🛡️', imageSrc: 'assets/cards/defuse.jpeg' },
     SKIP: { id: 'skip', name: 'Skip', type: 'action', cssClass: 'card-skip', emoji: '⏭️', imageSrc: 'assets/cards/skip.jpeg' },
     ATTACK: { id: 'attack', name: 'Attack', type: 'action', cssClass: 'card-attack', emoji: '⚔️', imageSrc: 'assets/cards/attack.jpeg' },
     SEE_FUTURE: { id: 'see_future', name: 'See the Future', type: 'action', cssClass: 'card-see-future', emoji: '🔮', imageSrc: 'assets/cards/seethefuture.jpeg' },
     SHUFFLE: { id: 'shuffle', name: 'Shuffle', type: 'action', cssClass: 'card-shuffle', emoji: '🔀', imageSrc: 'assets/cards/shuffle.jpeg' },
-    NOPE: { id: 'nope', name: 'Nope', type: 'action', cssClass: 'card-nope', emoji: '🙅', imageSrc: 'assets/cards/nope.jpeg' },
+    NOPE: { id: 'nope', name: 'Nope', type : 'action', cssClass: 'card-nope', emoji: '🙅', imageSrc: 'assets/cards/nope.jpeg' },
     FAVOR: { id: 'favor', name: 'Favor', type: 'action', cssClass: 'card-favor', emoji: '🙏', imageSrc: 'assets/cards/favor.jpeg' },
-    CAT_BEARD: { id: 'cat_beard', name: 'Beard Cat', type: 'cat', cssClass: 'card-cat', emoji: '🐱', catType: 'beard' },
-    CAT_CATTERMELON: { id: 'cat_cattermelon', name: 'Cattermelon', type: 'cat', cssClass: 'card-cat', emoji: '🍉', catType: 'cattermelon' },
-    CAT_HAIRY: { id: 'cat_hairy', name: 'Hairy Potato', type: 'cat', cssClass: 'card-cat', emoji: '🥔', catType: 'hairy' },
-    CAT_RAINICORN: { id: 'cat_rainicorn', name: 'Rain-icorn', type: 'cat', cssClass: 'card-cat', emoji: '🌈', catType: 'rainicorn' },
-    CAT_TACO: { id: 'cat_taco', name: 'Taco Cat', type: 'cat', cssClass: 'card-cat', emoji: '🌮', catType: 'taco' },
+    CAT_BEARD: { id: 'cat_beard', name: 'Beard Cat', type: 'cat', cssClass: 'card-cat', emoji: '🐱', imageSrc: 'assets/cards/beard.jpeg' },
+    CAT_CATTERMELON: { id: 'cat_cattermelon', name: 'Cattermelon', type: 'cat', cssClass: 'card-cat', emoji: '🍉', imageSrc: 'assets/cards/cattermelon.jpeg' },
+    CAT_HAIRY: { id: 'cat_hairy', name: 'Hairy Potato', type: 'cat', cssClass: 'card-cat', emoji: '🥔', imageSrc: 'assets/cards/potato.jpeg' },
+    CAT_RAINICORN: { id: 'cat_rainicorn', name: 'Rain-icorn', type: 'cat', cssClass: 'card-cat', emoji: '🌈', imageSrc: 'assets/cards/rainbow.jpeg' },
+    CAT_TACO: { id: 'cat_taco', name: 'Taco Cat', type: 'cat', cssClass: 'card-cat', emoji: '🌮', imageSrc: 'assets/cards/taco.jpeg' },
 };
 const CARDS_BY_ID = {};
 Object.values(CARD_TYPES).forEach(c => { CARDS_BY_ID[c.id] = c; });
