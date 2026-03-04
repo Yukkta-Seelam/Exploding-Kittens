@@ -565,6 +565,27 @@ body {
     display: inline-flex;
 }
 
+.exploding-reveal-card {
+    width: 140px;
+    height: 196px;
+    margin: 0 auto 1rem;
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.exploding-reveal-card .card {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+}
+
+.exploding-reveal-msg {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin: 1rem 0;
+    text-align: center;
+}
+
 .modal .btn {
     margin-top: 1rem;
     width: 100%;

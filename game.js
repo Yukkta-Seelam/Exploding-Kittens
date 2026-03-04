@@ -91,6 +91,7 @@ let gameState = {
     gameMode: 'base',
     pendingNope: null,
     lastEliminatedPlayerIndex: null, // Show "[Name] is out!" popup to all players
+    explodingReveal: null, // { playerIndex } when someone just drew Exploding Kitten (show card to all)
 };
 
 // Online state (Supabase)
@@ -107,6 +108,7 @@ let catStealMode = null;
 let pickFromDiscardMode = null;
 let lastShownElimination = -1;
 let lastHandToShowIndex = 0; // used by shuffle-hand so handler always shuffles the currently displayed hand
+let lastShownExplodingReveal = -1; // avoid showing "[X] drew Exploding Kitten" modal twice
 
 function getMyUserId() {
     if (myUserId) return myUserId;
@@ -133,6 +135,7 @@ function serializeState() {
         winnerIndex: gameState.winnerIndex ?? null,
         pendingNope: gameState.pendingNope,
         lastEliminatedPlayerIndex: gameState.lastEliminatedPlayerIndex,
+        explodingReveal: gameState.explodingReveal ?? null,
     };
 }
 function deserializeState(data, playerNames) {
@@ -150,6 +153,8 @@ function deserializeState(data, playerNames) {
     gameState.winnerIndex = data.winnerIndex ?? null;
     gameState.pendingNope = data.pendingNope ?? null;
     gameState.lastEliminatedPlayerIndex = data.lastEliminatedPlayerIndex ?? null;
+    gameState.explodingReveal = data.explodingReveal ?? null;
+    if (gameState.explodingReveal === null) lastShownExplodingReveal = -1;
 }
 
 // DOM refs
@@ -456,11 +461,21 @@ function subscribeToRoom() {
             if (data.gameState.winnerIndex != null) {
                 showWinner(data.gameState.winnerIndex);
             } else {
-                // Don't switch back to game if we're already on winner screen (e.g. we just ended the game locally and a stale "playing" event arrived)
                 const winnerScreenActive = winnerScreen && winnerScreen.classList.contains('active');
                 if (!winnerScreenActive) {
                     showScreen('game');
                     renderGame();
+                }
+                // Show "[Name] drew an Exploding Kitten!" to all other players when they receive the reveal
+                const rev = data.gameState.explodingReveal;
+                if (rev && rev.playerIndex !== myPlayerIndex && lastShownExplodingReveal !== rev.playerIndex) {
+                    lastShownExplodingReveal = rev.playerIndex;
+                    const name = (data.playerNames || [])[rev.playerIndex] || 'A player';
+                    const cardHtml = '<div class="exploding-reveal-card">' + getCardInnerHtml(CARD_TYPES.EXPLODING, false) + '</div>';
+                    const html = cardHtml + '<p class="exploding-reveal-msg">' + name + ' drew an Exploding Kitten!</p><button class="btn" id="exploding-reveal-other-continue">Continue</button>';
+                    showModal('Exploding Kitten!', html, () => {});
+                    const btn = document.getElementById('exploding-reveal-other-continue');
+                    if (btn) btn.onclick = () => { modalOverlay.classList.add('hidden'); };
                 }
             }
         } else if (data.status === 'ended' && data.gameState && data.gameState.winnerIndex != null) {
@@ -1551,56 +1566,75 @@ function drawCard() {
     const player = gameState.players[gameState.currentPlayerIndex];
 
     if (card.id === 'exploding') {
-        const hasDefuse = player.hand.findIndex(c => c.id === 'defuse') >= 0;
-        if (hasDefuse) {
-            const defuseIdx = player.hand.findIndex(c => c.id === 'defuse');
-            player.hand.splice(defuseIdx, 1);
-            gameState.discardPile.push(CARD_TYPES.DEFUSE);
+        gameState.explodingReveal = { playerIndex: gameState.currentPlayerIndex };
+        syncStateIfOnline();
 
-            // Let the player choose the position to put the Exploding Kitten back (1 = top of deck).
-            const maxPos = gameState.drawPile.length + 1;
-            let html = '<p>You defused the Exploding Kitten.</p>';
-            html += '<p>Choose the position to put it back in the draw pile (1 = top):</p>';
-            html += '<div class="defuse-positions">';
-            for (let pos = 1; pos <= maxPos; pos++) {
-                html += `<button class="btn" data-pos="${pos}">${pos}</button>`;
-            }
-            html += '</div>';
-            showModal('Place Exploding Kitten', html, () => {});
-            modalContent.querySelectorAll('[data-pos]').forEach(btn => {
-                btn.onclick = () => {
-                    const pos = parseInt(btn.dataset.pos, 10);
-                    const index = Math.min(Math.max(pos - 1, 0), gameState.drawPile.length);
-                    gameState.drawPile.splice(index, 0, card);
-                    modalOverlay.classList.add('hidden');
-                    advanceTurn();
-                    drawBtn.disabled = false;
-                    renderGame();
-                    syncStateIfOnline();
-                };
-            });
-            return;
-        } else {
-            // No defuse: this player is eliminated. Last player remaining wins — show game over immediately.
-            player.eliminated = true;
-            gameState.lastEliminatedPlayerIndex = gameState.currentPlayerIndex;
-            const alive = gameState.players.filter(p => !p.eliminated);
-            if (alive.length === 1) {
-                const winnerIdx = gameState.players.findIndex(p => !p.eliminated);
-                gameState.winnerIndex = winnerIdx;
-                showWinner(winnerIdx);
-                syncStateIfOnline();
-                if (isOnline && supabaseClient && roomCode) {
-                    supabaseClient.from('rooms').update({
-                        status: 'ended',
-                        game_state: serializeState(),
-                        last_updated: new Date().toISOString(),
-                    }).eq('room_code', roomCode).catch(() => {});
+        const playerName = gameState.playerNames[gameState.currentPlayerIndex];
+        const cardHtml = '<div class="exploding-reveal-card">' + getCardInnerHtml(CARD_TYPES.EXPLODING, false) + '</div>';
+        const msg = isOnline && gameState.currentPlayerIndex === myPlayerIndex
+            ? 'You drew an Exploding Kitten!'
+            : `${playerName} drew an Exploding Kitten!`;
+        let html = cardHtml + '<p class="exploding-reveal-msg">' + msg + '</p><button class="btn" id="exploding-reveal-continue">Continue</button>';
+        showModal('Exploding Kitten!', html, () => {});
+
+        const onContinue = () => {
+            modalOverlay.classList.add('hidden');
+            const hasDefuse = player.hand.findIndex(c => c.id === 'defuse') >= 0;
+            if (hasDefuse) {
+                const defuseIdx = player.hand.findIndex(c => c.id === 'defuse');
+                player.hand.splice(defuseIdx, 1);
+                gameState.discardPile.push(CARD_TYPES.DEFUSE);
+                const maxPos = gameState.drawPile.length + 1;
+                let posHtml = '<p>You defused the Exploding Kitten.</p>';
+                posHtml += '<p>Choose the position to put it back in the draw pile (1 = top):</p>';
+                posHtml += '<div class="defuse-positions">';
+                for (let pos = 1; pos <= maxPos; pos++) {
+                    posHtml += `<button class="btn" data-pos="${pos}">${pos}</button>`;
                 }
-                return;
+                posHtml += '</div>';
+                showModal('Place Exploding Kitten', posHtml, () => {});
+                modalContent.querySelectorAll('[data-pos]').forEach(btn => {
+                    btn.onclick = () => {
+                        const pos = parseInt(btn.dataset.pos, 10);
+                        const index = Math.min(Math.max(pos - 1, 0), gameState.drawPile.length);
+                        gameState.drawPile.splice(index, 0, card);
+                        gameState.explodingReveal = null;
+                        modalOverlay.classList.add('hidden');
+                        advanceTurn();
+                        drawBtn.disabled = false;
+                        renderGame();
+                        syncStateIfOnline();
+                    };
+                });
+            } else {
+                gameState.explodingReveal = null;
+                player.eliminated = true;
+                gameState.lastEliminatedPlayerIndex = gameState.currentPlayerIndex;
+                const alive = gameState.players.filter(p => !p.eliminated);
+                if (alive.length === 1) {
+                    const winnerIdx = gameState.players.findIndex(p => !p.eliminated);
+                    gameState.winnerIndex = winnerIdx;
+                    showWinner(winnerIdx);
+                    syncStateIfOnline();
+                    if (isOnline && supabaseClient && roomCode) {
+                        supabaseClient.from('rooms').update({
+                            status: 'ended',
+                            game_state: serializeState(),
+                            last_updated: new Date().toISOString(),
+                        }).eq('room_code', roomCode).catch(() => {});
+                    }
+                    return;
+                }
+                advanceTurn();
             }
-            advanceTurn();
-        }
+            drawBtn.disabled = false;
+            renderGame();
+            syncStateIfOnline();
+        };
+
+        const continueBtn = document.getElementById('exploding-reveal-continue');
+        if (continueBtn) continueBtn.onclick = onContinue;
+        return;
     } else {
         player.hand.push(card);
         advanceTurn();
