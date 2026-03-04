@@ -7,12 +7,12 @@
 const CARD_TYPES = {
     EXPLODING: { id: 'exploding', name: 'Exploding Kitten', type: 'exploding', cssClass: 'card-exploding', emoji: '💥' },
     DEFUSE: { id: 'defuse', name: 'Defuse', type: 'defuse', cssClass: 'card-defuse', emoji: '🛡️' },
-    SKIP: { id: 'skip', name: 'Skip', type: 'action', cssClass: 'card-skip', emoji: '⏭️' },
-    ATTACK: { id: 'attack', name: 'Attack', type: 'action', cssClass: 'card-attack', emoji: '⚔️' },
-    SEE_FUTURE: { id: 'see_future', name: 'See the Future', type: 'action', cssClass: 'card-see-future', emoji: '🔮' },
-    SHUFFLE: { id: 'shuffle', name: 'Shuffle', type: 'action', cssClass: 'card-shuffle', emoji: '🔀' },
-    NOPE: { id: 'nope', name: 'Nope', type: 'action', cssClass: 'card-nope', emoji: '🙅' },
-    FAVOR: { id: 'favor', name: 'Favor', type: 'action', cssClass: 'card-favor', emoji: '🙏' },
+    SKIP: { id: 'skip', name: 'Skip', type: 'action', cssClass: 'card-skip', emoji: '⏭️', imageSrc: 'assets/cards/skip.jpeg' },
+    ATTACK: { id: 'attack', name: 'Attack', type: 'action', cssClass: 'card-attack', emoji: '⚔️', imageSrc: 'assets/cards/attack.jpeg' },
+    SEE_FUTURE: { id: 'see_future', name: 'See the Future', type: 'action', cssClass: 'card-see-future', emoji: '🔮', imageSrc: 'assets/cards/seethefuture.jpeg' },
+    SHUFFLE: { id: 'shuffle', name: 'Shuffle', type: 'action', cssClass: 'card-shuffle', emoji: '🔀', imageSrc: 'assets/cards/shuffle.jpeg' },
+    NOPE: { id: 'nope', name: 'Nope', type: 'action', cssClass: 'card-nope', emoji: '🙅', imageSrc: 'assets/cards/nope.jpeg' },
+    FAVOR: { id: 'favor', name: 'Favor', type: 'action', cssClass: 'card-favor', emoji: '🙏', imageSrc: 'assets/cards/favor.jpeg' },
     CAT_BEARD: { id: 'cat_beard', name: 'Beard Cat', type: 'cat', cssClass: 'card-cat', emoji: '🐱', catType: 'beard' },
     CAT_CATTERMELON: { id: 'cat_cattermelon', name: 'Cattermelon', type: 'cat', cssClass: 'card-cat', emoji: '🍉', catType: 'cattermelon' },
     CAT_HAIRY: { id: 'cat_hairy', name: 'Hairy Potato', type: 'cat', cssClass: 'card-cat', emoji: '🥔', catType: 'hairy' },
@@ -587,11 +587,22 @@ function leaveRoom() {
 
 
 // Create card element
+function getCardInnerHtml(card, small = false) {
+    if (card.imageSrc) {
+        const cls = small ? 'card-img-small' : 'card-img';
+        return `<img src="${card.imageSrc}" alt="${card.name}" class="${cls}">`;
+    }
+    if (small) {
+        return `<span>${card.emoji}</span><span class="card-name-small">${card.name}</span>`;
+    }
+    return `<span>${card.emoji}</span><span>${card.name}</span>`;
+}
+
 function createCardElement(card, index, playable = false) {
     const el = document.createElement('div');
     el.className = `card ${card.cssClass} ${!playable ? 'disabled' : ''}`;
     el.dataset.index = index;
-    el.innerHTML = `<span>${card.emoji}</span><span>${card.name}</span>`;
+    el.innerHTML = getCardInnerHtml(card, false);
     return el;
 }
 
@@ -796,7 +807,10 @@ function renderGame() {
         const showCards = isSpectator;
         const cardsHtml = showCards
             ? (gameState.players[i].hand.length
-                ? gameState.players[i].hand.map(c => `<div class="card ${c.cssClass} card-small">${c.emoji} ${c.name}</div>`).join('')
+                ? gameState.players[i].hand.map(c => {
+                    const inner = getCardInnerHtml(c, true);
+                    return `<div class="card ${c.cssClass} card-small">${inner}</div>`;
+                }).join('')
                 : `<div class="opponent-empty">(no cards)</div>`)
             : gameState.players[i].hand.map((_, cardIdx) => {
                 const clickable = inCatSteal;
@@ -839,7 +853,7 @@ function renderGame() {
             const actualIndex = start + i;
             const el = document.createElement('div');
             el.className = `card ${card.cssClass} card-small ${inPickFromDiscard ? 'clickable' : ''}`;
-            el.innerHTML = `<span>${card.emoji}</span><span class="card-name-small">${card.name}</span>`;
+            el.innerHTML = getCardInnerHtml(card, true);
             if (inPickFromDiscard) {
                 el.dataset.discardIndex = actualIndex;
                 el.addEventListener('click', () => onPickFromDiscardClick(actualIndex));
