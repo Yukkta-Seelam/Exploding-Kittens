@@ -1584,17 +1584,7 @@ function drawCard() {
                 const defuseIdx = player.hand.findIndex(c => c.id === 'defuse');
                 player.hand.splice(defuseIdx, 1);
                 gameState.discardPile.push(CARD_TYPES.DEFUSE);
-                const maxPos = gameState.drawPile.length + 1;
-                let posHtml = '<p>You defused the Exploding Kitten.</p>';
-                posHtml += '<p>Choose the position to put it back in the draw pile (1 = top):</p>';
-                posHtml += '<div class="defuse-positions">';
-                for (let pos = 1; pos <= maxPos; pos++) {
-                    posHtml += `<button class="btn" data-pos="${pos}">${pos}</button>`;
-                }
-                posHtml += '</div>';
-                posHtml += '<button class="btn btn-ghost defuse-place-random" id="defuse-place-random-btn">Place randomly</button>';
-                showModal('Place Exploding Kitten', posHtml, () => {});
-                if (modalClose) modalClose.style.display = 'none';
+
                 const placeAt = (index) => {
                     gameState.drawPile.splice(index, 0, card);
                     gameState.explodingReveal = null;
@@ -1605,17 +1595,42 @@ function drawCard() {
                     renderGame();
                     syncStateIfOnline();
                 };
-                modalContent.querySelectorAll('[data-pos]').forEach(btn => {
-                    btn.onclick = () => {
-                        const pos = parseInt(btn.dataset.pos, 10);
-                        const index = Math.min(Math.max(pos - 1, 0), gameState.drawPile.length);
-                        placeAt(index);
-                    };
-                });
+
+                // Step 1: Two options only — Place randomly OR Choose position
+                const step1Html = '<p>You defused the Exploding Kitten. How do you want to put it back?</p>' +
+                    '<div class="defuse-options">' +
+                    '<button class="btn btn-primary" id="defuse-place-random-btn">Place randomly</button>' +
+                    '<button class="btn btn-secondary" id="defuse-choose-position-btn">Choose position to place Exploding Kitten</button>' +
+                    '</div>';
+                showModal('Place Exploding Kitten', step1Html, () => {});
+                if (modalClose) modalClose.style.display = 'none';
+
                 const randomBtn = document.getElementById('defuse-place-random-btn');
                 if (randomBtn) randomBtn.onclick = () => {
                     const index = Math.floor(Math.random() * (gameState.drawPile.length + 1));
                     placeAt(index);
+                };
+
+                const choosePosBtn = document.getElementById('defuse-choose-position-btn');
+                if (choosePosBtn) choosePosBtn.onclick = () => {
+                    modalOverlay.classList.add('hidden');
+                    // Step 2: Position picker (1 = top, 2, 3, ...)
+                    const maxPos = gameState.drawPile.length + 1;
+                    let posHtml = '<p>Choose the position to put it back in the draw pile (1 = top):</p>';
+                    posHtml += '<div class="defuse-positions">';
+                    for (let pos = 1; pos <= maxPos; pos++) {
+                        posHtml += `<button class="btn" data-pos="${pos}">${pos}</button>`;
+                    }
+                    posHtml += '</div>';
+                    showModal('Choose position', posHtml, () => { if (modalClose) modalClose.style.display = ''; });
+                    if (modalClose) modalClose.style.display = 'none';
+                    modalContent.querySelectorAll('[data-pos]').forEach(btn => {
+                        btn.onclick = () => {
+                            const pos = parseInt(btn.dataset.pos, 10);
+                            const index = Math.min(Math.max(pos - 1, 0), gameState.drawPile.length);
+                            placeAt(index);
+                        };
+                    });
                 };
             } else {
                 gameState.explodingReveal = null;

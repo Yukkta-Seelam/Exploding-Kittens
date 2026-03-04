@@ -610,9 +610,23 @@ body {
     margin-top: 0;
 }
 
-.defuse-place-random {
+.defuse-options {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
     margin-top: 1rem;
-    width: 100%;
+}
+
+.defuse-options .btn {
+    margin-top: 0;
+}
+
+.defuse-positions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    justify-content: center;
+    margin-top: 0.5rem;
 }
 
 .modal .btn {
