@@ -18,7 +18,7 @@ const CARD_TYPES = {
     CAT_HAIRY: { id: 'cat_hairy', name: 'Hairy Potato', type: 'cat', cssClass: 'card-cat', emoji: '🥔', imageSrc: 'assets/cards/potato.jpeg', catType: 'hairy' },
     CAT_RAINICORN: { id: 'cat_rainicorn', name: 'Rain-icorn', type: 'cat', cssClass: 'card-cat', emoji: '🌈', imageSrc: 'assets/cards/rainbow.jpeg', catType: 'rainicorn' },
     CAT_TACO: { id: 'cat_taco', name: 'Taco Cat', type: 'cat', cssClass: 'card-cat', emoji: '🌮', imageSrc: 'assets/cards/taco.jpeg', catType: 'taco' },
-    CAT_FERAL: { id: 'cat_feral', name: 'Feral Cat', type: 'cat', cssClass: 'card-cat', emoji: '🃏', catType: 'feral', isFeral: true },
+    CAT_FERAL: { id: 'cat_feral', name: 'Feral Cat', type: 'cat', cssClass: 'card-cat', emoji: '🃏', imageSrc: 'assets/cards/feral.jpeg', catType: 'feral', isFeral: true },
 };
 const CARDS_BY_ID = {};
 Object.values(CARD_TYPES).forEach(c => { CARDS_BY_ID[c.id] = c; });
@@ -192,6 +192,7 @@ const pendingCardsEl = document.getElementById('pending-cards');
 const discardCardsEl = document.getElementById('discard-cards');
 const confirmPlayBtn = document.getElementById('confirm-play-btn');
 const cancelPlayBtn = document.getElementById('cancel-play-btn');
+const shuffleHandBtn = document.getElementById('shuffle-hand-btn');
 
 // Player count options based on mode
 function updatePlayerCountOptions() {
@@ -902,6 +903,19 @@ function renderGame() {
     }
 
     drawBtn.disabled = isSpectator || !isMyTurn || (myHand && myHand.eliminated) || inCatSteal || inPickFromDiscard;
+
+    // Shuffle hand: visible when showing a hand (not spectator), shuffles that player's hand
+    if (shuffleHandBtn) {
+        shuffleHandBtn.style.display = isSpectator ? 'none' : 'inline-block';
+        shuffleHandBtn.onclick = () => {
+            const idx = isOnline ? myPlayerIndex : handToShowIndex;
+            if (idx >= 0 && gameState.players[idx] && gameState.players[idx].hand.length) {
+                gameState.players[idx].hand = shuffle(gameState.players[idx].hand);
+                renderGame();
+                syncStateIfOnline();
+            }
+        };
+    }
 }
 
 function canPlayCard(card, index) {

@@ -505,6 +505,14 @@ body {
     cursor: pointer;
 }
 
+.hand-actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
 .btn-draw {
     background: linear-gradient(135deg, var(--explode-orange), var(--explode-dark));
     color: white;
