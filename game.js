@@ -5,8 +5,8 @@
 
 // Card definitions
 const CARD_TYPES = {
-    EXPLODING: { id: 'exploding', name: 'Exploding Kitten', type: 'exploding', cssClass: 'card-exploding', emoji: '💥' },
-    DEFUSE: { id: 'defuse', name: 'Defuse', type: 'defuse', cssClass: 'card-defuse', emoji: '🛡️' },
+    EXPLODING: { id: 'exploding', name: 'Exploding Kitten', type: 'exploding', cssClass: 'card-exploding', emoji: '💥', imageSrc: 'assets/cards/exploding.jpeg' },
+    DEFUSE: { id: 'defuse', name: 'Defuse', type: 'defuse', cssClass: 'card-defuse', emoji: '🛡️', imageSrc: 'assets/cards/defuse.jpeg' },
     SKIP: { id: 'skip', name: 'Skip', type: 'action', cssClass: 'card-skip', emoji: '⏭️', imageSrc: 'assets/cards/skip.jpeg' },
     ATTACK: { id: 'attack', name: 'Attack', type: 'action', cssClass: 'card-attack', emoji: '⚔️', imageSrc: 'assets/cards/attack.jpeg' },
     SEE_FUTURE: { id: 'see_future', name: 'See the Future', type: 'action', cssClass: 'card-see-future', emoji: '🔮', imageSrc: 'assets/cards/seethefuture.jpeg' },
