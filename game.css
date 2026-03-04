@@ -586,6 +586,35 @@ body {
     text-align: center;
 }
 
+.winner-modal-msg {
+    font-size: 1.5rem;
+    font-weight: 700;
+    text-align: center;
+    margin: 0.5rem 0;
+}
+
+.winner-modal-sub {
+    font-size: 1rem;
+    text-align: center;
+    margin-bottom: 1.25rem;
+    color: var(--text-muted, #666);
+}
+
+.winner-modal-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.winner-modal-buttons .btn {
+    margin-top: 0;
+}
+
+.defuse-place-random {
+    margin-top: 1rem;
+    width: 100%;
+}
+
 .modal .btn {
     margin-top: 1rem;
     width: 100%;

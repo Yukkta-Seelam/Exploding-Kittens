@@ -1592,20 +1592,31 @@ function drawCard() {
                     posHtml += `<button class="btn" data-pos="${pos}">${pos}</button>`;
                 }
                 posHtml += '</div>';
+                posHtml += '<button class="btn btn-ghost defuse-place-random" id="defuse-place-random-btn">Place randomly</button>';
                 showModal('Place Exploding Kitten', posHtml, () => {});
+                if (modalClose) modalClose.style.display = 'none';
+                const placeAt = (index) => {
+                    gameState.drawPile.splice(index, 0, card);
+                    gameState.explodingReveal = null;
+                    modalOverlay.classList.add('hidden');
+                    if (modalClose) modalClose.style.display = '';
+                    advanceTurn();
+                    drawBtn.disabled = false;
+                    renderGame();
+                    syncStateIfOnline();
+                };
                 modalContent.querySelectorAll('[data-pos]').forEach(btn => {
                     btn.onclick = () => {
                         const pos = parseInt(btn.dataset.pos, 10);
                         const index = Math.min(Math.max(pos - 1, 0), gameState.drawPile.length);
-                        gameState.drawPile.splice(index, 0, card);
-                        gameState.explodingReveal = null;
-                        modalOverlay.classList.add('hidden');
-                        advanceTurn();
-                        drawBtn.disabled = false;
-                        renderGame();
-                        syncStateIfOnline();
+                        placeAt(index);
                     };
                 });
+                const randomBtn = document.getElementById('defuse-place-random-btn');
+                if (randomBtn) randomBtn.onclick = () => {
+                    const index = Math.floor(Math.random() * (gameState.drawPile.length + 1));
+                    placeAt(index);
+                };
             } else {
                 gameState.explodingReveal = null;
                 player.eliminated = true;
@@ -1647,12 +1658,40 @@ function drawCard() {
 function showWinner(winnerIndex) {
     gameState.winnerIndex = winnerIndex;
     const winnerName = gameState.playerNames[winnerIndex];
-    // Update DOM and switch to winner screen first so the losing player always sees "Game Over" immediately
-    if (winnerMessage) winnerMessage.textContent = `🎉 ${winnerName} Wins! 🏆`;
-    if (winnerSubtitleEl) winnerSubtitleEl.textContent = 'They avoided all the Exploding Kittens! 🐱💥';
-    if (modalOverlay) modalOverlay.classList.add('hidden');
-    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-    if (winnerScreen) winnerScreen.classList.add('active');
+    // Show winner as a modal on top of the game so players can still see the board and their cards
+    const msg = `🎉 ${winnerName} Wins! 🏆`;
+    const sub = 'They avoided all the Exploding Kittens! 🐱💥';
+    const html = `<p class="winner-modal-msg">${msg}</p><p class="winner-modal-sub">${sub}</p><div class="winner-modal-buttons"><button class="btn btn-primary" id="winner-modal-play-again">Play Again (Same Party)</button><button class="btn btn-ghost" id="winner-modal-cancel">Cancel</button></div>`;
+    showModal('Game Over', html, () => {});
+    if (modalClose) {
+        modalClose.style.display = 'block';
+        modalClose.textContent = 'Close';
+        modalClose.onclick = () => {
+            modalOverlay.classList.add('hidden');
+            modalClose.style.display = '';
+            modalClose.textContent = 'Close';
+            if (isOnline) leaveRoom();
+            else showScreen('home');
+        };
+    }
+    const playAgainEl = document.getElementById('winner-modal-play-again');
+    const cancelEl = document.getElementById('winner-modal-cancel');
+    if (playAgainEl) {
+        playAgainEl.onclick = () => {
+            modalOverlay.classList.add('hidden');
+            if (modalClose) { modalClose.style.display = ''; modalClose.textContent = 'Close'; }
+            if (isOnline) restartGameOnline();
+            else setupGameFromState(gameState.playerNames, gameState.playerCount, gameState.gameMode);
+        };
+    }
+    if (cancelEl) {
+        cancelEl.onclick = () => {
+            modalOverlay.classList.add('hidden');
+            if (modalClose) { modalClose.style.display = ''; modalClose.textContent = 'Close'; }
+            if (isOnline) leaveRoom();
+            else showScreen('home');
+        };
+    }
 }
 
 function syncStateIfOnline() {
