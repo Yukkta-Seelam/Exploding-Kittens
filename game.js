@@ -13,11 +13,12 @@ const CARD_TYPES = {
     SHUFFLE: { id: 'shuffle', name: 'Shuffle', type: 'action', cssClass: 'card-shuffle', emoji: '🔀', imageSrc: 'assets/cards/shuffle.jpeg' },
     NOPE: { id: 'nope', name: 'Nope', type : 'action', cssClass: 'card-nope', emoji: '🙅', imageSrc: 'assets/cards/nope.jpeg' },
     FAVOR: { id: 'favor', name: 'Favor', type: 'action', cssClass: 'card-favor', emoji: '🙏', imageSrc: 'assets/cards/favor.jpeg' },
-    CAT_BEARD: { id: 'cat_beard', name: 'Beard Cat', type: 'cat', cssClass: 'card-cat', emoji: '🐱', imageSrc: 'assets/cards/beard.jpeg' },
-    CAT_CATTERMELON: { id: 'cat_cattermelon', name: 'Cattermelon', type: 'cat', cssClass: 'card-cat', emoji: '🍉', imageSrc: 'assets/cards/cattermelon.jpeg' },
-    CAT_HAIRY: { id: 'cat_hairy', name: 'Hairy Potato', type: 'cat', cssClass: 'card-cat', emoji: '🥔', imageSrc: 'assets/cards/potato.jpeg' },
-    CAT_RAINICORN: { id: 'cat_rainicorn', name: 'Rain-icorn', type: 'cat', cssClass: 'card-cat', emoji: '🌈', imageSrc: 'assets/cards/rainbow.jpeg' },
-    CAT_TACO: { id: 'cat_taco', name: 'Taco Cat', type: 'cat', cssClass: 'card-cat', emoji: '🌮', imageSrc: 'assets/cards/taco.jpeg' },
+    CAT_BEARD: { id: 'cat_beard', name: 'Beard Cat', type: 'cat', cssClass: 'card-cat', emoji: '🐱', imageSrc: 'assets/cards/beard.jpeg', catType: 'beard' },
+    CAT_CATTERMELON: { id: 'cat_cattermelon', name: 'Cattermelon', type: 'cat', cssClass: 'card-cat', emoji: '🍉', imageSrc: 'assets/cards/cattermelon.jpeg', catType: 'cattermelon' },
+    CAT_HAIRY: { id: 'cat_hairy', name: 'Hairy Potato', type: 'cat', cssClass: 'card-cat', emoji: '🥔', imageSrc: 'assets/cards/potato.jpeg', catType: 'hairy' },
+    CAT_RAINICORN: { id: 'cat_rainicorn', name: 'Rain-icorn', type: 'cat', cssClass: 'card-cat', emoji: '🌈', imageSrc: 'assets/cards/rainbow.jpeg', catType: 'rainicorn' },
+    CAT_TACO: { id: 'cat_taco', name: 'Taco Cat', type: 'cat', cssClass: 'card-cat', emoji: '🌮', imageSrc: 'assets/cards/taco.jpeg', catType: 'taco' },
+    CAT_FERAL: { id: 'cat_feral', name: 'Feral Cat', type: 'cat', cssClass: 'card-cat', emoji: '🃏', catType: 'feral', isFeral: true },
 };
 const CARDS_BY_ID = {};
 Object.values(CARD_TYPES).forEach(c => { CARDS_BY_ID[c.id] = c; });
@@ -40,6 +41,7 @@ const BASE_DECK = [
     ...Array(5).fill(CARD_TYPES.CAT_HAIRY),
     ...Array(5).fill(CARD_TYPES.CAT_RAINICORN),
     ...Array(5).fill(CARD_TYPES.CAT_TACO),
+    ...Array(4).fill(CARD_TYPES.CAT_FERAL),
 ];
 
 function createPartyDeck(playerCount) {
@@ -909,29 +911,65 @@ function canPlayCard(card, index) {
     if (card.type === 'action') return true;
     if (card.type === 'cat') {
         const hand = gameState.players[gameState.currentPlayerIndex].hand;
-        const sameCats = hand.filter(c => c.type === 'cat' && c.catType === card.catType);
-        if (sameCats.length >= 2) return true; // 2 or 3 of same
-        // 5 different cats
-        const catTypes = new Set(hand.filter(c => c.type === 'cat').map(c => c.catType));
-        return catTypes.size >= 5;
+        const cats = hand.filter(c => c.type === 'cat');
+        const feralCount = cats.filter(c => c.catType === 'feral').length;
+        const counts = {};
+        cats.forEach(c => {
+            if (c.catType === 'feral') return;
+            counts[c.catType] = (counts[c.catType] || 0) + 1;
+        });
+        // 2-of-a-kind or 3-of-a-kind possible if any real type plus ferals reaches 2+
+        let canSameCombo = false;
+        for (const t in counts) {
+            if (counts[t] + feralCount >= 2) {
+                canSameCombo = true;
+                break;
+            }
+        }
+        if (!canSameCombo && feralCount >= 2) canSameCombo = true; // e.g. two ferals
+        if (canSameCombo) return true;
+        // 5 different cats possible with ferals filling gaps
+        const nonFeralTypes = Object.keys(counts);
+        let distinct = nonFeralTypes.length;
+        distinct += Math.min(feralCount, 5 - distinct);
+        return distinct >= 5;
     }
     return false;
 }
 
-function getPendingCatTypes(hand) {
-    return pendingCards.map(i => hand[i]).filter(c => c && c.type === 'cat').map(c => c.catType);
+function getPendingCats(hand) {
+    return pendingCards.map(i => hand[i]).filter(c => c && c.type === 'cat');
 }
 
+// 3-of-a-kind: allow Feral Cat(s) to stand in, but 2 same + 1 different (no feral) must NOT count.
 function isPendingThreeSame(hand) {
     if (pendingCards.length !== 3) return false;
-    const types = getPendingCatTypes(hand);
-    return types.length === 3 && new Set(types).size === 1;
+    const cats = getPendingCats(hand);
+    if (cats.length !== 3) return false;
+    const feralCount = cats.filter(c => c.catType === 'feral').length;
+    const nonFeral = cats.filter(c => c.catType !== 'feral').map(c => c.catType);
+    const counts = {};
+    nonFeral.forEach(t => { counts[t] = (counts[t] || 0) + 1; });
+    // Any real type plus available ferals can make 3 of that type
+    for (const t in counts) {
+        if (counts[t] + feralCount >= 3) return true;
+    }
+    // All ferals: they can act as any same type
+    if (nonFeral.length === 0 && feralCount === 3) return true;
+    return false;
 }
 
+// 5 different cats: Feral Cat(s) can fill in missing unique types.
 function isPendingFiveDifferent(hand) {
     if (pendingCards.length !== 5) return false;
-    const types = getPendingCatTypes(hand);
-    return new Set(types).size === 5;
+    const cats = getPendingCats(hand);
+    if (cats.length !== 5) return false;
+    const feralCount = cats.filter(c => c.catType === 'feral').length;
+    const nonFeralTypes = Array.from(new Set(cats.filter(c => c.catType !== 'feral').map(c => c.catType)));
+    let distinct = nonFeralTypes.length;
+    // Each feral can pretend to be a missing unique cat up to 5 total
+    distinct += Math.min(feralCount, 5 - distinct);
+    return distinct >= 5;
 }
 
 function selectCard(idx) {
@@ -943,7 +981,8 @@ function selectCard(idx) {
         pendingCards = [idx];
     } else if (card.type === 'cat') {
         const sameTypeIndices = hand.map((c, i) => (c.type === 'cat' && c.catType === card.catType) ? i : -1).filter(i => i >= 0);
-        const pendingTypes = getPendingCatTypes(hand);
+        const pendingCats = getPendingCats(hand);
+        const pendingTypes = pendingCats.map(c => c.catType);
         const pendingSet = new Set(pendingTypes);
 
         if (pendingCards.length === 0) {
