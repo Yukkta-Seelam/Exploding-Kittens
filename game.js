@@ -64,6 +64,20 @@ function shuffle(array) {
     return arr;
 }
 
+// Shuffle a player's hand in place (so UI and state stay in sync)
+function shufflePlayerHand(playerIndex) {
+    const p = gameState.players[playerIndex];
+    if (!p || !p.hand || p.hand.length === 0) return;
+    const h = p.hand;
+    for (let i = h.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [h[i], h[j]] = [h[j], h[i]];
+    }
+    pendingCards = []; // clear selection so indices don't point to wrong cards
+    renderGame();
+    syncStateIfOnline();
+}
+
 // Game State
 let gameState = {
     players: [],
@@ -92,6 +106,7 @@ let pendingCards = [];
 let catStealMode = null;
 let pickFromDiscardMode = null;
 let lastShownElimination = -1;
+let lastHandToShowIndex = 0; // used by shuffle-hand so handler always shuffles the currently displayed hand
 
 function getMyUserId() {
     if (myUserId) return myUserId;
@@ -904,17 +919,11 @@ function renderGame() {
 
     drawBtn.disabled = isSpectator || !isMyTurn || (myHand && myHand.eliminated) || inCatSteal || inPickFromDiscard;
 
+    lastHandToShowIndex = handToShowIndex;
+
     // Shuffle hand: visible when showing a hand (not spectator), shuffles that player's hand
     if (shuffleHandBtn) {
         shuffleHandBtn.style.display = isSpectator ? 'none' : 'inline-block';
-        shuffleHandBtn.onclick = () => {
-            const idx = isOnline ? myPlayerIndex : handToShowIndex;
-            if (idx >= 0 && gameState.players[idx] && gameState.players[idx].hand.length) {
-                gameState.players[idx].hand = shuffle(gameState.players[idx].hand);
-                renderGame();
-                syncStateIfOnline();
-            }
-        };
     }
 }
 
@@ -1636,6 +1645,10 @@ if (drawPileEl) drawPileEl.addEventListener('click', () => {
     if (!drawBtn.disabled) drawCard();
 });
 if (drawBtn) drawBtn.addEventListener('click', drawCard);
+if (shuffleHandBtn) shuffleHandBtn.addEventListener('click', () => {
+    const idx = isOnline ? myPlayerIndex : lastHandToShowIndex;
+    if (idx >= 0) shufflePlayerHand(idx);
+});
 if (confirmPlayBtn) confirmPlayBtn.addEventListener('click', confirmPlay);
 if (cancelPlayBtn) cancelPlayBtn.addEventListener('click', cancelPlay);
 
