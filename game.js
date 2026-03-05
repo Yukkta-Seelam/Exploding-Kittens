@@ -878,14 +878,12 @@ function renderGame() {
         });
     }
 
-    // Discard area: show last played cards (visible to all). When picking from discard (5-cat), cards are clickable.
+    // Discard area: show all played cards from the beginning (visible to all).
+    // When picking from discard (5-cat), cards are clickable.
     if (discardCardsEl) {
         discardCardsEl.innerHTML = '';
         const dp = gameState.discardPile;
-        const start = inPickFromDiscard ? 0 : Math.max(0, dp.length - 8);
-        const slice = dp.slice(start);
-        slice.forEach((card, i) => {
-            const actualIndex = start + i;
+        dp.forEach((card, actualIndex) => {
             const el = document.createElement('div');
             const hasImage = card.imageSrc ? ' has-image' : '';
             el.className = `card ${card.cssClass} card-small${hasImage} ${inPickFromDiscard ? 'clickable' : ''}`;
@@ -1016,8 +1014,16 @@ function selectCard(idx) {
     if (!card || !canPlayCard(card, idx)) return;
 
     if (card.type === 'action') {
+        // Action cards (Skip, Attack, Shuffle, See the Future) must be played alone.
+        // Selecting an action always replaces any existing selection.
         pendingCards = [idx];
     } else if (card.type === 'cat') {
+        // Cat combos must not be mixed with an action card selection.
+        const hadActionSelected = pendingCards.some(i => hand[i] && hand[i].type === 'action');
+        if (hadActionSelected) {
+            pendingCards = [];
+        }
+
         const sameTypeIndices = hand.map((c, i) => (c.type === 'cat' && c.catType === card.catType) ? i : -1).filter(i => i >= 0);
         const pendingCats = getPendingCats(hand);
         const pendingTypes = pendingCats.map(c => c.catType);
@@ -1025,7 +1031,8 @@ function selectCard(idx) {
 
         if (pendingCards.length === 0) {
             pendingCards = [idx];
-        } else if (isPendingThreeSame(hand) || isPendingFiveDifferent(hand)) {
+        } else if (isPendingFiveDifferent(hand)) {
+            // Already have a valid 5-different combo selected; don't add more.
             return;
         } else if (pendingCards.length === 1) {
             if (hand[pendingCards[0]].catType === card.catType) {
@@ -1077,10 +1084,11 @@ function confirmPlay() {
     const card = cards[0];
     if (card.type === 'cat') {
         const hand = gameState.players[gameState.currentPlayerIndex]?.hand || [];
-        if (isPendingThreeSame(hand)) {
-            executeCatCombo(3);
-        } else if (isPendingFiveDifferent(hand)) {
+        // Prefer 5-different over 3-of-a-kind when both are possible (e.g. many Feral Cats).
+        if (isPendingFiveDifferent(hand)) {
             executeCatCombo(5);
+        } else if (isPendingThreeSame(hand)) {
+            executeCatCombo(3);
         } else if (cards.length === 2) {
             executeCatCombo(2);
         }
@@ -1568,6 +1576,7 @@ function drawCard() {
     if (card.id === 'exploding') {
         gameState.explodingReveal = { playerIndex: gameState.currentPlayerIndex };
         syncStateIfOnline();
+        const playerName = gameState.playerNames[gameState.currentPlayerIndex];
 
         const hasDefuse = player.hand.findIndex(c => c.id === 'defuse') >= 0;
 
@@ -1592,7 +1601,7 @@ function drawCard() {
 
             const cardHtml = '<div class="exploding-reveal-card">' + getCardInnerHtml(CARD_TYPES.EXPLODING, false) + '</div>';
             const defuseHtml = cardHtml +
-                '<p class="exploding-reveal-msg">You defused it. Put the Exploding Kitten back in the draw pile:</p>' +
+                `<p class="exploding-reveal-msg">${playerName} has drawn an Exploding Kitten.</p>` +
                 '<div class="defuse-options">' +
                 '<button class="btn btn-primary" id="defuse-place-random-btn">Place kitten back randomly</button>' +
                 '<button class="btn btn-secondary" id="defuse-choose-position-btn">Choose where to place kitten</button>' +
@@ -1630,7 +1639,6 @@ function drawCard() {
         }
 
         // No defuse: show "You drew an Exploding Kitten!" then eliminate
-        const playerName = gameState.playerNames[gameState.currentPlayerIndex];
         const cardHtml = '<div class="exploding-reveal-card">' + getCardInnerHtml(CARD_TYPES.EXPLODING, false) + '</div>';
         const msg = isOnline && gameState.currentPlayerIndex === myPlayerIndex
             ? 'You drew an Exploding Kitten!'
