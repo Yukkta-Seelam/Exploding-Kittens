@@ -1569,97 +1569,101 @@ function drawCard() {
         gameState.explodingReveal = { playerIndex: gameState.currentPlayerIndex };
         syncStateIfOnline();
 
+        const hasDefuse = player.hand.findIndex(c => c.id === 'defuse') >= 0;
+
+        if (hasDefuse) {
+            // Has defuse: no Continue/Close — show only the two choices
+            const defuseIdx = player.hand.findIndex(c => c.id === 'defuse');
+            player.hand.splice(defuseIdx, 1);
+            gameState.discardPile.push(CARD_TYPES.DEFUSE);
+
+            const placeAt = (index) => {
+                gameState.drawPile.splice(index, 0, card);
+                gameState.explodingReveal = null;
+                // Turn ends immediately after placing the Exploding Kitten back
+                gameState.attacksPending = 0;
+                modalOverlay.classList.add('hidden');
+                if (modalClose) modalClose.style.display = '';
+                advanceTurn();
+                drawBtn.disabled = false;
+                renderGame();
+                syncStateIfOnline();
+            };
+
+            const cardHtml = '<div class="exploding-reveal-card">' + getCardInnerHtml(CARD_TYPES.EXPLODING, false) + '</div>';
+            const defuseHtml = cardHtml +
+                '<p class="exploding-reveal-msg">You defused it. Put the Exploding Kitten back in the draw pile:</p>' +
+                '<div class="defuse-options">' +
+                '<button class="btn btn-primary" id="defuse-place-random-btn">Place kitten back randomly</button>' +
+                '<button class="btn btn-secondary" id="defuse-choose-position-btn">Choose where to place kitten</button>' +
+                '</div>';
+            showModal('Exploding Kitten', defuseHtml, () => {});
+            if (modalClose) modalClose.style.display = 'none';
+
+            const randomBtn = document.getElementById('defuse-place-random-btn');
+            if (randomBtn) randomBtn.onclick = () => {
+                const index = Math.floor(Math.random() * (gameState.drawPile.length + 1));
+                placeAt(index);
+            };
+
+            const choosePosBtn = document.getElementById('defuse-choose-position-btn');
+            if (choosePosBtn) choosePosBtn.onclick = () => {
+                modalOverlay.classList.add('hidden');
+                const maxPos = gameState.drawPile.length + 1;
+                let posHtml = '<p>Choose the position in the draw pile (1 = top):</p>';
+                posHtml += '<div class="defuse-positions">';
+                for (let pos = 1; pos <= maxPos; pos++) {
+                    posHtml += `<button class="btn" data-pos="${pos}">${pos}</button>`;
+                }
+                posHtml += '</div>';
+                showModal('Choose position', posHtml, () => { if (modalClose) modalClose.style.display = ''; });
+                if (modalClose) modalClose.style.display = 'none';
+                modalContent.querySelectorAll('[data-pos]').forEach(btn => {
+                    btn.onclick = () => {
+                        const pos = parseInt(btn.dataset.pos, 10);
+                        const index = Math.min(Math.max(pos - 1, 0), gameState.drawPile.length);
+                        placeAt(index);
+                    };
+                });
+            };
+            return;
+        }
+
+        // No defuse: show "You drew an Exploding Kitten!" then eliminate
         const playerName = gameState.playerNames[gameState.currentPlayerIndex];
         const cardHtml = '<div class="exploding-reveal-card">' + getCardInnerHtml(CARD_TYPES.EXPLODING, false) + '</div>';
         const msg = isOnline && gameState.currentPlayerIndex === myPlayerIndex
             ? 'You drew an Exploding Kitten!'
             : `${playerName} drew an Exploding Kitten!`;
-        let html = cardHtml + '<p class="exploding-reveal-msg">' + msg + '</p><button class="btn" id="exploding-reveal-continue">Continue</button>';
+        const html = cardHtml + '<p class="exploding-reveal-msg">' + msg + '</p><button class="btn" id="exploding-reveal-continue">Continue</button>';
         showModal('Exploding Kitten!', html, () => {});
 
-        const onContinue = () => {
+        const continueBtn = document.getElementById('exploding-reveal-continue');
+        if (continueBtn) continueBtn.onclick = () => {
             modalOverlay.classList.add('hidden');
-            const hasDefuse = player.hand.findIndex(c => c.id === 'defuse') >= 0;
-            if (hasDefuse) {
-                const defuseIdx = player.hand.findIndex(c => c.id === 'defuse');
-                player.hand.splice(defuseIdx, 1);
-                gameState.discardPile.push(CARD_TYPES.DEFUSE);
-
-                const placeAt = (index) => {
-                    gameState.drawPile.splice(index, 0, card);
-                    gameState.explodingReveal = null;
-                    modalOverlay.classList.add('hidden');
-                    if (modalClose) modalClose.style.display = '';
-                    advanceTurn();
-                    drawBtn.disabled = false;
-                    renderGame();
-                    syncStateIfOnline();
-                };
-
-                // Step 1: Two options only — Place randomly OR Choose position
-                const step1Html = '<p>You defused the Exploding Kitten. How do you want to put it back?</p>' +
-                    '<div class="defuse-options">' +
-                    '<button class="btn btn-primary" id="defuse-place-random-btn">Place randomly</button>' +
-                    '<button class="btn btn-secondary" id="defuse-choose-position-btn">Choose position to place Exploding Kitten</button>' +
-                    '</div>';
-                showModal('Place Exploding Kitten', step1Html, () => {});
-                if (modalClose) modalClose.style.display = 'none';
-
-                const randomBtn = document.getElementById('defuse-place-random-btn');
-                if (randomBtn) randomBtn.onclick = () => {
-                    const index = Math.floor(Math.random() * (gameState.drawPile.length + 1));
-                    placeAt(index);
-                };
-
-                const choosePosBtn = document.getElementById('defuse-choose-position-btn');
-                if (choosePosBtn) choosePosBtn.onclick = () => {
-                    modalOverlay.classList.add('hidden');
-                    // Step 2: Position picker (1 = top, 2, 3, ...)
-                    const maxPos = gameState.drawPile.length + 1;
-                    let posHtml = '<p>Choose the position to put it back in the draw pile (1 = top):</p>';
-                    posHtml += '<div class="defuse-positions">';
-                    for (let pos = 1; pos <= maxPos; pos++) {
-                        posHtml += `<button class="btn" data-pos="${pos}">${pos}</button>`;
-                    }
-                    posHtml += '</div>';
-                    showModal('Choose position', posHtml, () => { if (modalClose) modalClose.style.display = ''; });
-                    if (modalClose) modalClose.style.display = 'none';
-                    modalContent.querySelectorAll('[data-pos]').forEach(btn => {
-                        btn.onclick = () => {
-                            const pos = parseInt(btn.dataset.pos, 10);
-                            const index = Math.min(Math.max(pos - 1, 0), gameState.drawPile.length);
-                            placeAt(index);
-                        };
-                    });
-                };
-            } else {
-                gameState.explodingReveal = null;
-                player.eliminated = true;
-                gameState.lastEliminatedPlayerIndex = gameState.currentPlayerIndex;
-                const alive = gameState.players.filter(p => !p.eliminated);
-                if (alive.length === 1) {
-                    const winnerIdx = gameState.players.findIndex(p => !p.eliminated);
-                    gameState.winnerIndex = winnerIdx;
-                    showWinner(winnerIdx);
-                    syncStateIfOnline();
-                    if (isOnline && supabaseClient && roomCode) {
-                        supabaseClient.from('rooms').update({
-                            status: 'ended',
-                            game_state: serializeState(),
-                            last_updated: new Date().toISOString(),
-                        }).eq('room_code', roomCode).catch(() => {});
-                    }
-                    return;
+            gameState.explodingReveal = null;
+            player.eliminated = true;
+            gameState.lastEliminatedPlayerIndex = gameState.currentPlayerIndex;
+            const alive = gameState.players.filter(p => !p.eliminated);
+            if (alive.length === 1) {
+                const winnerIdx = gameState.players.findIndex(p => !p.eliminated);
+                gameState.winnerIndex = winnerIdx;
+                showWinner(winnerIdx);
+                syncStateIfOnline();
+                if (isOnline && supabaseClient && roomCode) {
+                    supabaseClient.from('rooms').update({
+                        status: 'ended',
+                        game_state: serializeState(),
+                        last_updated: new Date().toISOString(),
+                    }).eq('room_code', roomCode).catch(() => {});
                 }
-                advanceTurn();
+                return;
             }
+            advanceTurn();
             drawBtn.disabled = false;
             renderGame();
             syncStateIfOnline();
         };
-
-        const continueBtn = document.getElementById('exploding-reveal-continue');
-        if (continueBtn) continueBtn.onclick = onContinue;
         return;
     } else {
         player.hand.push(card);
