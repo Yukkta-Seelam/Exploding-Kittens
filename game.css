@@ -290,6 +290,11 @@ body {
     margin-bottom: 1.5rem;
 }
 
+.game-board.local-two-player .players-area {
+    display: none;
+}
+}
+
 .opponent-info {
     text-align: center;
 }
@@ -499,9 +504,48 @@ body {
     border-top: 2px solid var(--card-border);
 }
 
-.current-player-area h3 {
+.current-player-area h3,
+.current-player-area .hand-section-label {
     margin-bottom: 1rem;
     color: var(--text-dark);
+}
+
+/* Single hand (default / online / 3+ local): only one section visible */
+.hand-sections.single .hand-section {
+    display: none;
+}
+.hand-sections.single .hand-section.active {
+    display: block;
+}
+
+/* Two hands side by side (local 2-player) */
+.hand-sections.two {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 1.5rem;
+    align-items: flex-start;
+    width: 100%;
+}
+.hand-sections.two .hand-section {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 1rem;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.4);
+    border: 2px solid var(--card-border);
+}
+.hand-sections.two .hand-section.current-turn {
+    border-color: var(--kitten-dark, #C44569);
+    box-shadow: 0 0 0 2px rgba(196, 69, 105, 0.3);
+}
+.hand-sections.two .hand-section .hand {
+    justify-content: center;
+}
+.hand-sections.two .hand-section .hand .card.disabled {
+    opacity: 0.85;
 }
 
 .hand {

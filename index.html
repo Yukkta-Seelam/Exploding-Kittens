@@ -173,13 +173,20 @@
                     </div>
                 </div>
                 
-                <div class="current-player-area">
-                    <h3 id="current-player-label">Your Hand</h3>
-                    <div class="hand" id="hand">
-                        <!-- Cards rendered by JS -->
+                <div class="current-player-area" id="current-player-area">
+                    <div class="hand-sections single" id="hand-sections">
+                        <div class="hand-section hand-section-0" id="hand-section-0">
+                            <h3 class="hand-section-label" id="hand-label-0">Your Hand</h3>
+                            <div class="hand" id="hand"></div>
+                            <button class="btn btn-ghost-small shuffle-hand-btn" type="button" data-player="0" id="shuffle-hand-btn">Shuffle hand</button>
+                        </div>
+                        <div class="hand-section hand-section-1" id="hand-section-1">
+                            <h3 class="hand-section-label" id="hand-label-1">Player 2's Hand</h3>
+                            <div class="hand" id="hand-player-1"></div>
+                            <button class="btn btn-ghost-small shuffle-hand-btn" type="button" data-player="1" id="shuffle-hand-btn-1">Shuffle hand</button>
+                        </div>
                     </div>
                     <div class="hand-actions">
-                        <button id="shuffle-hand-btn" class="btn btn-ghost-small" type="button">Shuffle hand</button>
                         <button id="draw-btn" class="btn btn-draw">Draw a Card</button>
                     </div>
                 </div>

@@ -177,11 +177,18 @@ const drawBtn = document.getElementById('draw-btn');
 const drawPileEl = document.getElementById('draw-pile');
 const pileCountEl = document.getElementById('pile-count');
 const handEl = document.getElementById('hand');
+const handPlayer1El = document.getElementById('hand-player-1');
+const handSectionsEl = document.getElementById('hand-sections');
+const handSection0El = document.getElementById('hand-section-0');
+const handSection1El = document.getElementById('hand-section-1');
+const handLabel0El = document.getElementById('hand-label-0');
+const handLabel1El = document.getElementById('hand-label-1');
+const gameBoardEl = document.getElementById('game-board');
 const playersAreaEl = document.getElementById('players-area');
 const turnIndicatorEl = document.getElementById('turn-indicator');
 const turnBannerEl = document.getElementById('turn-banner');
 const turnBannerNameEl = document.getElementById('turn-banner-name');
-const currentPlayerLabel = document.getElementById('current-player-label');
+const currentPlayerLabel = document.getElementById('current-player-label'); // legacy single label; in two-mode we use handLabel0El/handLabel1El
 const modalOverlay = document.getElementById('modal-overlay');
 const modal = document.getElementById('modal');
 const modalTitle = document.getElementById('modal-title');
@@ -819,7 +826,8 @@ function renderGame() {
     // Spectator: eliminated player (online) sees all players' hands and full game state
     const isSpectator = isOnline && gameState.players[myPlayerIndex] && gameState.players[myPlayerIndex].eliminated;
 
-    // In online mode: each player sees only THEIR hand (or spectator view). In local mode: show current turn player's hand.
+    // In online mode: each player sees only THEIR hand (or spectator view). In local mode: show current turn player's hand (or both when 2-player local).
+    const isLocalTwoPlayer = !isOnline && gameState.playerCount === 2;
     const handToShowIndex = isSpectator ? turnPlayerIndex : (isOnline ? myPlayerIndex : turnPlayerIndex);
     const myHand = gameState.players[handToShowIndex];
 
@@ -827,11 +835,20 @@ function renderGame() {
     if (turnBannerEl && turnBannerNameEl) {
         turnBannerNameEl.textContent = turnPlayerName;
     }
-    if (isSpectator) {
-        currentPlayerLabel.textContent = "You're out! Spectating";
-    } else {
-        currentPlayerLabel.textContent = isOnline ? 'Your Hand' : `${turnPlayerName}'s Hand`;
+
+    // Layout: two hands side-by-side for local 2-player; single hand otherwise
+    if (gameBoardEl) gameBoardEl.classList.toggle('local-two-player', isLocalTwoPlayer);
+    if (handSectionsEl) {
+        handSectionsEl.className = isLocalTwoPlayer ? 'hand-sections two' : 'hand-sections single';
+        if (!isLocalTwoPlayer && handSection0El && handSection1El) {
+            handSection0El.classList.toggle('active', handToShowIndex === 0);
+            handSection1El.classList.toggle('active', handToShowIndex === 1);
+        }
     }
+    if (handLabel0El) handLabel0El.textContent = isLocalTwoPlayer ? `${gameState.playerNames[0]}'s Hand` : (handToShowIndex === 0 ? (isSpectator ? "You're out! Spectating" : (isOnline ? 'Your Hand' : `${turnPlayerName}'s Hand`)) : '');
+    if (handLabel1El) handLabel1El.textContent = isLocalTwoPlayer ? `${gameState.playerNames[1]}'s Hand` : (handToShowIndex === 1 ? (isSpectator ? "You're out! Spectating" : (isOnline ? 'Your Hand' : `${turnPlayerName}'s Hand`)) : '');
+    if (handSection0El) handSection0El.classList.toggle('current-turn', isLocalTwoPlayer && turnPlayerIndex === 0);
+    if (handSection1El) handSection1El.classList.toggle('current-turn', isLocalTwoPlayer && turnPlayerIndex === 1);
 
     // Clear pending if not our turn (online)
     if (isOnline && !isMyTurn) {
@@ -925,31 +942,61 @@ function renderGame() {
         turnBannerNameEl.textContent = turnPlayerName;
     }
 
-    // Show hand (only playable when it's your turn in online mode). Spectators see message only.
+    // Show hand(s). Local 2-player: both hands visible; otherwise single hand (current or yours).
     handEl.innerHTML = '';
-    if (isSpectator) {
+    if (handPlayer1El) handPlayer1El.innerHTML = '';
+    if (isLocalTwoPlayer) {
+        for (let pIdx = 0; pIdx <= 1; pIdx++) {
+            const container = pIdx === 0 ? handEl : handPlayer1El;
+            if (!container) continue;
+            const hand = gameState.players[pIdx]?.hand || [];
+            const isCurrent = gameState.currentPlayerIndex === pIdx;
+            const eliminated = gameState.players[pIdx]?.eliminated;
+            hand.forEach((card, idx) => {
+                const inPending = isCurrent && pendingCards.includes(idx);
+                let playable = isCurrent && canPlayCard(card, idx) && !inPending && !eliminated;
+                if (inCatSteal || inPickFromDiscard) playable = false;
+                const el = createCardElement(card, idx, playable);
+                if (playable) {
+                    el.addEventListener('click', () => selectCard(idx));
+                }
+                container.appendChild(el);
+            });
+        }
+    } else if (isSpectator) {
         handEl.innerHTML = '<p class="spectator-msg">You\'re out! Watch the remaining players above. Draw pile and last played cards are shown in the center.</p>';
     } else {
-        myHand.hand.forEach((card, idx) => {
-            const inPending = pendingCards.includes(idx);
-            let playable = canPlayCard(card, idx) && !inPending;
-            if (isOnline) playable = playable && isMyTurn && !myHand.eliminated;
-            if (inCatSteal || inPickFromDiscard) playable = false;
-            const el = createCardElement(card, idx, playable);
-            if (playable) {
-                el.addEventListener('click', () => selectCard(idx));
-            }
-            handEl.appendChild(el);
-        });
+        const singleHandContainer = handToShowIndex === 0 ? handEl : handPlayer1El;
+        if (singleHandContainer) {
+            myHand.hand.forEach((card, idx) => {
+                const inPending = pendingCards.includes(idx);
+                let playable = canPlayCard(card, idx) && !inPending;
+                if (isOnline) playable = playable && isMyTurn && !myHand.eliminated;
+                if (inCatSteal || inPickFromDiscard) playable = false;
+                const el = createCardElement(card, idx, playable);
+                if (playable) {
+                    el.addEventListener('click', () => selectCard(idx));
+                }
+                singleHandContainer.appendChild(el);
+            });
+        }
     }
 
     drawBtn.disabled = isSpectator || !isMyTurn || (myHand && myHand.eliminated) || inCatSteal || inPickFromDiscard;
 
     lastHandToShowIndex = handToShowIndex;
 
-    // Shuffle hand: visible when showing a hand (not spectator), shuffles that player's hand
-    if (shuffleHandBtn) {
-        shuffleHandBtn.style.display = isSpectator ? 'none' : 'inline-block';
+    // Shuffle hand: in two-player local show both buttons; in single view show one
+    const shuffleBtns = document.querySelectorAll('.shuffle-hand-btn');
+    if (shuffleBtns.length) {
+        shuffleBtns.forEach(btn => {
+            if (isLocalTwoPlayer) {
+                btn.style.display = 'inline-block';
+            } else {
+                const section = btn.closest('.hand-section');
+                btn.style.display = (isSpectator || !section) ? 'none' : (section.classList.contains('active') ? 'inline-block' : 'none');
+            }
+        });
     }
 }
 
@@ -1845,8 +1892,11 @@ if (drawPileEl) drawPileEl.addEventListener('click', () => {
     if (!drawBtn.disabled) drawCard();
 });
 if (drawBtn) drawBtn.addEventListener('click', drawCard);
-if (shuffleHandBtn) shuffleHandBtn.addEventListener('click', () => {
-    const idx = isOnline ? myPlayerIndex : lastHandToShowIndex;
+if (handSectionsEl) handSectionsEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('.shuffle-hand-btn');
+    if (!btn) return;
+    const isLocalTwoPlayer = !isOnline && gameState.playerCount === 2;
+    const idx = isLocalTwoPlayer && btn.dataset.player != null ? parseInt(btn.dataset.player, 10) : (isOnline ? myPlayerIndex : lastHandToShowIndex);
     if (idx >= 0) shufflePlayerHand(idx);
 });
 if (confirmPlayBtn) confirmPlayBtn.addEventListener('click', confirmPlay);
