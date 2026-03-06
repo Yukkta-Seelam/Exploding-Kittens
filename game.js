@@ -1186,24 +1186,53 @@ function cancelPlay() {
 
 function confirmPlay() {
     if (pendingCards.length === 0) return;
-    const hand = gameState.players[gameState.currentPlayerIndex]?.hand || [];
+    const actingPlayerIndex = gameState.currentPlayerIndex;
+    const hand = gameState.players[actingPlayerIndex]?.hand || [];
     const cards = pendingCards.map(i => hand[i]).filter(Boolean);
     if (cards.length === 0) return;
 
     const card = cards[0];
-    if (card.type === 'cat') {
-        const hand = gameState.players[gameState.currentPlayerIndex]?.hand || [];
-        // Prefer 5-different over 3-of-a-kind when both are possible (e.g. many Feral Cats).
-        if (isPendingFiveDifferent(hand)) {
-            executeCatCombo(5);
-        } else if (isPendingThreeSame(hand)) {
-            executeCatCombo(3);
-        } else if (cards.length === 2) {
-            executeCatCombo(2);
+    const onCancelled = () => {
+        pendingCards = [];
+        renderGame();
+        syncStateIfOnline();
+    };
+
+    // All plays (except Defuse, which is never played from hand this way) can be Nope'd. Run Nope flow first, then execute.
+    if (isOnline) {
+        // Online: execute directly; Nope flow is handled via pendingNope/state when we add it.
+        if (card.type === 'cat') {
+            const h = gameState.players[actingPlayerIndex]?.hand || [];
+            const count = isPendingFiveDifferent(h) ? 5 : isPendingThreeSame(h) ? 3 : 2;
+            executeCatCombo(count);
+        } else {
+            executeActionCard(pendingCards[0]);
         }
-    } else {
-        executeActionCard(pendingCards[0]);
+        return;
     }
+
+    let cardDescriptor = card;
+    let effectFn;
+
+    if (card.type === 'cat') {
+        const h = gameState.players[actingPlayerIndex]?.hand || [];
+        const count = isPendingFiveDifferent(h) ? 5 : isPendingThreeSame(h) ? 3 : 2;
+        const indicesCopy = [...pendingCards].sort((a, b) => a - b).reverse().slice(0, count);
+        cardDescriptor = {
+            name: count === 2 ? '2 Same Cats' : count === 3 ? '3 Same Cats' : '5 Different Cards',
+            emoji: '🐱',
+        };
+        effectFn = () => {
+            pendingCards = indicesCopy;
+            executeCatCombo(count);
+        };
+    } else {
+        const actionIndex = pendingCards[0];
+        cardDescriptor = hand[actionIndex];
+        effectFn = () => executeActionCard(actionIndex);
+    }
+
+    handleLocalNope(actingPlayerIndex, cardDescriptor, effectFn, 0, onCancelled);
 }
 
 function onCatStealCardClick(targetPlayerIndex, cardIndex) {
@@ -1460,6 +1489,7 @@ function handleLocalNope(actingPlayerIndex, card, effectFn, parity = 0, onCancel
     const nopeHolders = [];
     for (let i = 0; i < gameState.playerCount; i++) {
         if (gameState.players[i].eliminated) continue;
+        if (i === actingPlayerIndex) continue; // acting player cannot Nope their own play
         const hasNope = gameState.players[i].hand.some(c => c.id === 'nope');
         if (hasNope) {
             nopeHolders.push({ index: i, name: gameState.playerNames[i] });
