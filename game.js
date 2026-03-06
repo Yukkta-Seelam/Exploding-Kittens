@@ -10,6 +10,8 @@ const CARD_TYPES = {
     SKIP: { id: 'skip', name: 'Skip', type: 'action', cssClass: 'card-skip', emoji: '⏭️', imageSrc: 'assets/cards/skip.jpeg' },
     ATTACK: { id: 'attack', name: 'Attack', type: 'action', cssClass: 'card-attack', emoji: '⚔️', imageSrc: 'assets/cards/attack.jpeg' },
     SEE_FUTURE: { id: 'see_future', name: 'See the Future', type: 'action', cssClass: 'card-see-future', emoji: '🔮', imageSrc: 'assets/cards/seethefuture.jpeg' },
+    ALTER_FUTURE: { id: 'alter_future', name: 'Alter Future', type: 'action', cssClass: 'card-alter-future', emoji: '✏️', imageSrc: 'assets/cards/alterfuture.jpeg' },
+    DRAW_FROM_BOTTOM: { id: 'draw_from_bottom', name: 'Draw from Bottom', type: 'action', cssClass: 'card-draw-from-bottom', emoji: '⬇️', imageSrc: 'assets/cards/drawfb.jpeg' },
     SHUFFLE: { id: 'shuffle', name: 'Shuffle', type: 'action', cssClass: 'card-shuffle', emoji: '🔀', imageSrc: 'assets/cards/shuffle.jpeg' },
     NOPE: { id: 'nope', name: 'Nope', type : 'action', cssClass: 'card-nope', emoji: '🙅', imageSrc: 'assets/cards/nope.jpeg' },
     FAVOR: { id: 'favor', name: 'Favor', type: 'action', cssClass: 'card-favor', emoji: '🙏', imageSrc: 'assets/cards/favor.jpeg' },
@@ -33,6 +35,8 @@ const BASE_DECK = [
     ...Array(4).fill(CARD_TYPES.SKIP),
     ...Array(4).fill(CARD_TYPES.ATTACK),
     ...Array(5).fill(CARD_TYPES.SEE_FUTURE),
+    ...Array(4).fill(CARD_TYPES.ALTER_FUTURE),
+    ...Array(4).fill(CARD_TYPES.DRAW_FROM_BOTTOM),
     ...Array(4).fill(CARD_TYPES.SHUFFLE),
     ...Array(5).fill(CARD_TYPES.NOPE),
     ...Array(4).fill(CARD_TYPES.FAVOR),
@@ -92,6 +96,7 @@ let gameState = {
     pendingNope: null,
     lastEliminatedPlayerIndex: null, // Show "[Name] is out!" popup to all players
     explodingReveal: null, // { playerIndex } when someone just drew Exploding Kitten (show card to all)
+    nextDrawFromBottom: false, // When true, next draw is from bottom of deck (Draw from Bottom card)
 };
 
 // Online state (Supabase)
@@ -136,6 +141,7 @@ function serializeState() {
         pendingNope: gameState.pendingNope,
         lastEliminatedPlayerIndex: gameState.lastEliminatedPlayerIndex,
         explodingReveal: gameState.explodingReveal ?? null,
+        nextDrawFromBottom: gameState.nextDrawFromBottom ?? false,
     };
 }
 function deserializeState(data, playerNames) {
@@ -154,6 +160,7 @@ function deserializeState(data, playerNames) {
     gameState.pendingNope = data.pendingNope ?? null;
     gameState.lastEliminatedPlayerIndex = data.lastEliminatedPlayerIndex ?? null;
     gameState.explodingReveal = data.explodingReveal ?? null;
+    gameState.nextDrawFromBottom = data.nextDrawFromBottom ?? false;
     if (gameState.explodingReveal === null) lastShownExplodingReveal = -1;
 }
 
@@ -530,6 +537,8 @@ async function startGameOnline() {
         gameMode: mode,
         pendingNope: null,
         lastEliminatedPlayerIndex: null,
+        explodingReveal: null,
+        nextDrawFromBottom: false,
     };
     let deck = mode === 'party' ? createPartyDeck(playerCount) : [...BASE_DECK];
     deck = deck.filter(c => c.id !== 'exploding' && c.id !== 'defuse');
@@ -658,6 +667,8 @@ function setupGame() {
         gameMode: mode,
         pendingNope: null,
         lastEliminatedPlayerIndex: null,
+        explodingReveal: null,
+        nextDrawFromBottom: false,
     };
 
     // Build deck
@@ -721,6 +732,8 @@ function setupGameFromState(names, playerCount, mode) {
         gameMode: mode,
         pendingNope: null,
         lastEliminatedPlayerIndex: null,
+        explodingReveal: null,
+        nextDrawFromBottom: false,
     };
     let deck = mode === 'party' ? createPartyDeck(playerCount) : [...BASE_DECK];
     deck = deck.filter(c => c.id !== 'exploding' && c.id !== 'defuse');
@@ -1047,7 +1060,15 @@ function selectCard(idx) {
                 pendingCards = [pendingCards[0], pendingCards[1], idx];
             }
         } else if (pendingCards.length === 2 && pendingSet.size === 2) {
-            if (card.catType === hand[pendingCards[0]].catType && sameTypeIndices.length >= 3) {
+            // Two different types selected (e.g. 1 regular + 1 feral). Adding a third can make 3-of-a-kind (e.g. regular + 2 ferals).
+            const withThird = [pendingCards[0], pendingCards[1], idx];
+            const tempPending = pendingCards.slice();
+            pendingCards = withThird;
+            const wouldBeThreeSame = isPendingThreeSame(hand);
+            pendingCards = tempPending;
+            if (wouldBeThreeSame) {
+                pendingCards = withThird;
+            } else if (card.catType === hand[pendingCards[0]].catType && sameTypeIndices.length >= 3) {
                 pendingCards = sameTypeIndices.slice(0, 3);
             } else if (!pendingSet.has(card.catType)) {
                 pendingCards = [pendingCards[0], pendingCards[1], idx];
@@ -1176,6 +1197,10 @@ function runPendingEffect(p) {
         const top3 = gameState.drawPile.slice(0, 3);
         const html = top3.map(c => `<div class="card ${c.cssClass}">${c.emoji} ${c.name}</div>`).join('');
         showModal('See the Future', html);
+    } else if (p.effectType === 'alter_future') {
+        runAlterFutureFlow();
+    } else if (p.effectType === 'draw_from_bottom') {
+        gameState.nextDrawFromBottom = true;
     } else if (p.effectType === 'shuffle') {
         gameState.drawPile = shuffle(gameState.drawPile);
         advanceTurn();
@@ -1429,6 +1454,67 @@ function showModal(title, contentHtml, onClose) {
     modalClose.onclick = close;
 }
 
+function runAlterFutureFlow() {
+    const top3 = gameState.drawPile.slice(0, 3);
+    if (top3.length < 3) {
+        renderGame();
+        syncStateIfOnline();
+        return;
+    }
+    let orderedCards = [...top3];
+
+    function renderSlots() {
+        const container = document.getElementById('alter-future-slots');
+        if (!container) return;
+        container.innerHTML = '';
+        orderedCards.forEach((card, i) => {
+            const slot = document.createElement('div');
+            slot.className = 'alter-future-slot';
+            slot.dataset.slotIndex = String(i);
+            const cardEl = document.createElement('div');
+            cardEl.className = `card ${card.cssClass} has-image`;
+            cardEl.innerHTML = getCardInnerHtml(card, false);
+            cardEl.draggable = true;
+            cardEl.dataset.cardIndex = String(i);
+            cardEl.addEventListener('dragstart', (e) => {
+                e.dataTransfer.setData('text/plain', i);
+                e.dataTransfer.effectAllowed = 'move';
+                e.target.classList.add('alter-future-dragging');
+            });
+            cardEl.addEventListener('dragend', (e) => e.target.classList.remove('alter-future-dragging'));
+            slot.appendChild(cardEl);
+            slot.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+            });
+            slot.addEventListener('drop', (e) => {
+                e.preventDefault();
+                const from = parseInt(e.dataTransfer.getData('text/plain'), 10);
+                const to = parseInt(slot.dataset.slotIndex, 10);
+                if (from === to) return;
+                const card = orderedCards[from];
+                orderedCards.splice(from, 1);
+                orderedCards.splice(to, 0, card);
+                renderSlots();
+            });
+            container.appendChild(slot);
+        });
+    }
+
+    const html = '<p>Drag cards to set the new order (left = top of deck).</p>' +
+        '<div id="alter-future-slots" class="alter-future-slots"></div>' +
+        '<button class="btn btn-primary" id="alter-future-confirm">Confirm order</button>';
+    showModal('Alter Future', html, () => {});
+    renderSlots();
+
+    document.getElementById('alter-future-confirm').onclick = () => {
+        gameState.drawPile.splice(0, 3, ...orderedCards);
+        modalOverlay.classList.add('hidden');
+        renderGame();
+        syncStateIfOnline();
+    };
+}
+
 function executeActionCard(index) {
     const player = gameState.players[gameState.currentPlayerIndex];
     const card = player.hand[index];
@@ -1463,6 +1549,18 @@ function executeActionCard(index) {
         const top3 = gameState.drawPile.slice(0, 3);
         const html = top3.map(c => `<div class="card ${c.cssClass}">${c.emoji} ${c.name}</div>`).join('');
         showModal('See the Future', html);
+        renderGame();
+        syncStateIfOnline();
+        return;
+    }
+
+    if (card.id === 'alter_future') {
+        runAlterFutureFlow();
+        return;
+    }
+
+    if (card.id === 'draw_from_bottom') {
+        gameState.nextDrawFromBottom = true;
         renderGame();
         syncStateIfOnline();
         return;
@@ -1570,7 +1668,9 @@ function drawCard() {
         return;
     }
 
-    const card = gameState.drawPile.shift();
+    const fromBottom = gameState.nextDrawFromBottom === true;
+    if (fromBottom) gameState.nextDrawFromBottom = false;
+    const card = fromBottom ? gameState.drawPile.pop() : gameState.drawPile.shift();
     const player = gameState.players[gameState.currentPlayerIndex];
 
     if (card.id === 'exploding') {

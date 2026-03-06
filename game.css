@@ -641,6 +641,41 @@ body {
     margin-top: 0.5rem;
 }
 
+.alter-future-slots {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 0.75rem;
+    justify-content: center;
+    align-items: center;
+    min-height: 120px;
+    margin: 1rem 0;
+    padding: 0.5rem;
+}
+
+.alter-future-slot {
+    min-width: 90px;
+    min-height: 126px;
+    border: 2px dashed var(--card-border, #E8D5C4);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 248, 240, 0.5);
+}
+
+.alter-future-slot .card {
+    margin: 0;
+    cursor: grab;
+}
+
+.alter-future-slot .card:active {
+    cursor: grabbing;
+}
+
+.alter-future-slot .card.alter-future-dragging {
+    opacity: 0.7;
+}
+
 .modal .btn {
     margin-top: 1rem;
     width: 100%;
