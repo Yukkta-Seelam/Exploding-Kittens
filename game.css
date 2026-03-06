@@ -677,6 +677,34 @@ body {
     margin-top: 0;
 }
 
+.favor-notify-msg {
+    font-size: 1.1rem;
+    text-align: center;
+    margin-bottom: 1rem;
+}
+
+.favor-notify-msg .btn,
+#favor-notify-ok {
+    margin-top: 0.5rem;
+}
+
+.favor-pick-cards {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    justify-content: center;
+    margin-top: 0.5rem;
+}
+
+.favor-pick-cards .favor-pick-card {
+    cursor: pointer;
+    margin: 0;
+}
+
+.favor-pick-cards .favor-pick-card:hover {
+    transform: translateY(-2px);
+}
+
 .defuse-positions {
     display: flex;
     flex-wrap: wrap;

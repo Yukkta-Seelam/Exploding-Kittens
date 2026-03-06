@@ -656,6 +656,47 @@ function createCardElement(card, index, playable = false) {
     return el;
 }
 
+// Favor: show notification to all then let target choose which card to give.
+function showFavorNotificationThenPicker(actingPlayerIndex, targetIdx, onComplete) {
+    const actingName = gameState.playerNames[actingPlayerIndex];
+    const targetName = gameState.playerNames[targetIdx];
+    const notifyHtml = `<p class="favor-notify-msg"><strong>${actingName}</strong> has asked for a favour from <strong>${targetName}</strong>.</p><button class="btn btn-primary" id="favor-notify-ok">OK</button>`;
+    showModal('Favour', notifyHtml, () => {});
+    document.getElementById('favor-notify-ok').onclick = () => {
+        modalOverlay.classList.add('hidden');
+        showFavorTargetPicker(actingPlayerIndex, targetIdx, onComplete);
+    };
+}
+
+function showFavorTargetPicker(actingPlayerIndex, targetIdx, onComplete) {
+    const actingName = gameState.playerNames[actingPlayerIndex];
+    const targetHand = gameState.players[targetIdx].hand;
+    if (!targetHand || targetHand.length === 0) {
+        if (onComplete) onComplete();
+        renderGame();
+        syncStateIfOnline();
+        return;
+    }
+    const actingPlayer = gameState.players[actingPlayerIndex];
+    const html = `<p>Choose a card to give to <strong>${actingName}</strong>:</p><div class="favor-pick-cards" id="favor-pick-cards"></div>`;
+    showModal('Give a card', html, () => {});
+    const container = document.getElementById('favor-pick-cards');
+    if (!container) return;
+    targetHand.forEach((card, idx) => {
+        const el = createCardElement(card, idx, true);
+        el.classList.add('favor-pick-card');
+        el.addEventListener('click', () => {
+            const taken = targetHand.splice(idx, 1)[0];
+            actingPlayer.hand.push(taken);
+            modalOverlay.classList.add('hidden');
+            if (onComplete) onComplete();
+            renderGame();
+            syncStateIfOnline();
+        });
+        container.appendChild(el);
+    });
+}
+
 // Setup game
 function setupGame() {
     const playerCount = parseInt(playerCountSelect.value, 10);
@@ -1263,18 +1304,11 @@ function runPendingEffect(p) {
         } else {
             const html = targets.map(t => `<button class="btn" data-target="${t.index}">${t.name}</button>`).join('');
             showModal('Choose player to take a card from', html, () => {});
-            const player = gameState.players[acting];
             modalContent.querySelectorAll('button').forEach(btn => {
                 btn.onclick = () => {
                     const targetIdx = parseInt(btn.dataset.target, 10);
-                    const targetHand = gameState.players[targetIdx].hand;
-                    const cardIdx = Math.floor(Math.random() * targetHand.length);
-                    const taken = targetHand.splice(cardIdx, 1)[0];
-                    player.hand.push(taken);
                     modalOverlay.classList.add('hidden');
-                    advanceTurn();
-                    renderGame();
-                    syncStateIfOnline();
+                    showFavorNotificationThenPicker(acting, targetIdx, () => advanceTurn());
                 };
             });
         }
@@ -1633,19 +1667,14 @@ function executeActionCard(index) {
             syncStateIfOnline();
             return;
         }
+        const actingPlayerIndex = gameState.currentPlayerIndex;
         const html = targets.map(t => `<button class="btn" data-target="${t.index}">${t.name}</button>`).join('');
         showModal('Choose player to take a card from', html, () => {});
         modalContent.querySelectorAll('button').forEach(btn => {
             btn.onclick = () => {
                 const targetIdx = parseInt(btn.dataset.target, 10);
-                const targetHand = gameState.players[targetIdx].hand;
-                const cardIdx = Math.floor(Math.random() * targetHand.length);
-                const taken = targetHand.splice(cardIdx, 1)[0];
-                player.hand.push(taken);
                 modalOverlay.classList.add('hidden');
-                // Still same player's turn.
-                renderGame();
-                syncStateIfOnline();
+                showFavorNotificationThenPicker(actingPlayerIndex, targetIdx, () => {});
             };
         });
         return;
