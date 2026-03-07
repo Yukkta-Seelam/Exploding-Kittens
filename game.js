@@ -1142,6 +1142,17 @@ function isPendingFiveDifferent(hand) {
     return distinct >= 5;
 }
 
+// Check if the given indices have potential to form 5-different (for building toward 5 cards).
+function couldFormFiveDifferent(hand, indices) {
+    const cats = indices.map(i => hand[i]).filter(c => c && c.type === 'cat');
+    if (cats.length !== indices.length) return false;
+    const feralCount = cats.filter(c => c.catType === 'feral').length;
+    const nonFeralTypes = Array.from(new Set(cats.filter(c => c.catType !== 'feral').map(c => c.catType)));
+    const distinct = nonFeralTypes.length;
+    const potential = distinct + Math.min(feralCount, 5 - distinct);
+    return potential >= indices.length;
+}
+
 function selectCard(idx) {
     const hand = gameState.players[gameState.currentPlayerIndex]?.hand || [];
     const card = hand[idx];
@@ -1196,9 +1207,24 @@ function selectCard(idx) {
             } else {
                 pendingCards = [idx];
             }
-        } else if (pendingCards.length >= 3 && pendingCards.length < 5 && pendingSet.size === pendingCards.length) {
-            if (!pendingSet.has(card.catType)) {
-                pendingCards = [...pendingCards, idx];
+        } else if (pendingCards.length >= 2 && pendingCards.length < 5) {
+            // Building toward 5-different: allow adding if result could form 5-different (ferals can fill gaps).
+            const withNew = [...pendingCards, idx];
+            const tempPending = pendingCards.slice();
+            pendingCards = withNew;
+            const wouldBeFiveDifferent = pendingCards.length === 5 && isPendingFiveDifferent(hand);
+            const wouldBeThreeSame = pendingCards.length === 3 && isPendingThreeSame(hand);
+            const hasFiveDifferentPotential = couldFormFiveDifferent(hand, withNew);
+            pendingCards = tempPending;
+            if (wouldBeThreeSame) {
+                pendingCards = withNew;
+            } else if (wouldBeFiveDifferent) {
+                pendingCards = withNew;
+            } else if (hasFiveDifferentPotential) {
+                // Still building toward 5-different
+                pendingCards = withNew;
+            } else {
+                pendingCards = [idx];
             }
         } else {
             pendingCards = [idx];
