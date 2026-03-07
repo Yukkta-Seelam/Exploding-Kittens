@@ -9,6 +9,7 @@ const CARD_TYPES = {
     DEFUSE: { id: 'defuse', name: 'Defuse', type: 'defuse', cssClass: 'card-defuse', emoji: '🛡️', imageSrc: 'assets/cards/defuse.jpeg' },
     SKIP: { id: 'skip', name: 'Skip', type: 'action', cssClass: 'card-skip', emoji: '⏭️', imageSrc: 'assets/cards/skip.jpeg' },
     ATTACK: { id: 'attack', name: 'Attack', type: 'action', cssClass: 'card-attack', emoji: '⚔️', imageSrc: 'assets/cards/attack.jpeg' },
+    TARGETED_ATTACK: { id: 'targeted_attack', name: 'Targeted Attack', type: 'action', cssClass: 'card-targeted-attack', emoji: '🎯', imageSrc: 'assets/cards/targattack.jpeg' },
     SEE_FUTURE: { id: 'see_future', name: 'See the Future', type: 'action', cssClass: 'card-see-future', emoji: '🔮', imageSrc: 'assets/cards/seethefuture.jpeg' },
     ALTER_FUTURE: { id: 'alter_future', name: 'Alter Future', type: 'action', cssClass: 'card-alter-future', emoji: '✏️', imageSrc: 'assets/cards/alterfuture.jpeg' },
     DRAW_FROM_BOTTOM: { id: 'draw_from_bottom', name: 'Draw from Bottom', type: 'action', cssClass: 'card-draw-from-bottom', emoji: '⬇️', imageSrc: 'assets/cards/drawfb.jpeg' },
@@ -28,34 +29,77 @@ Object.values(CARD_TYPES).forEach(c => { CARDS_BY_ID[c.id] = c; });
 // Cards that can be requested by name when playing 3 of the same cat (all except Exploding)
 const REQUESTABLE_CARDS = Object.values(CARD_TYPES).filter(c => c.id !== 'exploding');
 
-// Deck composition: Base (2-5 players) and Party (2-10 players)
-const BASE_DECK = [
-    ...Array(4).fill(CARD_TYPES.EXPLODING),
-    ...Array(6).fill(CARD_TYPES.DEFUSE),
-    ...Array(4).fill(CARD_TYPES.SKIP),
-    ...Array(4).fill(CARD_TYPES.ATTACK),
-    ...Array(5).fill(CARD_TYPES.SEE_FUTURE),
-    ...Array(4).fill(CARD_TYPES.ALTER_FUTURE),
-    ...Array(4).fill(CARD_TYPES.DRAW_FROM_BOTTOM),
-    ...Array(4).fill(CARD_TYPES.SHUFFLE),
-    ...Array(5).fill(CARD_TYPES.NOPE),
-    ...Array(4).fill(CARD_TYPES.FAVOR),
-    ...Array(5).fill(CARD_TYPES.CAT_BEARD),
-    ...Array(5).fill(CARD_TYPES.CAT_CATTERMELON),
-    ...Array(5).fill(CARD_TYPES.CAT_HAIRY),
-    ...Array(5).fill(CARD_TYPES.CAT_RAINICORN),
-    ...Array(5).fill(CARD_TYPES.CAT_TACO),
-    ...Array(4).fill(CARD_TYPES.CAT_FERAL),
-];
-
-function createPartyDeck(playerCount) {
-    const scale = Math.ceil(playerCount / 5);
+// Build the non-Exploding deck for a given player count, using tuned counts per range.
+// Exploding Kittens (N-1) are added separately after dealing starting hands.
+function buildBaseDeckForPlayerCount(playerCount) {
+    let cfg;
+    if (playerCount <= 3) {
+        cfg = {
+            defuse: 3,
+            attack: 2,
+            targeted_attack: 2,
+            skip: 4,
+            see_future: 3,
+            alter_future: 2,
+            shuffle: 2,
+            draw_from_bottom: 3,
+            favor: 2,
+            nope: 4,
+            feral: 2,
+            cat: 3, // each of the other 5 cats
+        };
+    } else if (playerCount <= 7) {
+        cfg = {
+            defuse: 7,
+            attack: 3,
+            targeted_attack: 3,
+            skip: 6,
+            see_future: 3,
+            alter_future: 4,
+            shuffle: 4,
+            draw_from_bottom: 4,
+            favor: 4,
+            nope: 5,
+            feral: 4,
+            cat: 4,
+        };
+    } else {
+        cfg = {
+            defuse: 10,
+            attack: 5,
+            targeted_attack: 5,
+            skip: 10,
+            see_future: 6,
+            alter_future: 6,
+            shuffle: 6,
+            draw_from_bottom: 7,
+            favor: 6,
+            nope: 9,
+            feral: 6,
+            cat: 7,
+        };
+    }
     const deck = [];
-    BASE_DECK.forEach(card => {
-        for (let i = 0; i < scale; i++) {
-            deck.push(card);
-        }
-    });
+    const add = (type, count) => {
+        for (let i = 0; i < count; i++) deck.push(type);
+    };
+    add(CARD_TYPES.DEFUSE, cfg.defuse);
+    add(CARD_TYPES.ATTACK, cfg.attack);
+    add(CARD_TYPES.TARGETED_ATTACK, cfg.targeted_attack);
+    add(CARD_TYPES.SKIP, cfg.skip);
+    add(CARD_TYPES.SEE_FUTURE, cfg.see_future);
+    add(CARD_TYPES.ALTER_FUTURE, cfg.alter_future);
+    add(CARD_TYPES.SHUFFLE, cfg.shuffle);
+    add(CARD_TYPES.DRAW_FROM_BOTTOM, cfg.draw_from_bottom);
+    add(CARD_TYPES.FAVOR, cfg.favor);
+    add(CARD_TYPES.NOPE, cfg.nope);
+    add(CARD_TYPES.CAT_FERAL, cfg.feral);
+    const otherCatCount = cfg.cat;
+    add(CARD_TYPES.CAT_BEARD, otherCatCount);
+    add(CARD_TYPES.CAT_CATTERMELON, otherCatCount);
+    add(CARD_TYPES.CAT_HAIRY, otherCatCount);
+    add(CARD_TYPES.CAT_RAINICORN, otherCatCount);
+    add(CARD_TYPES.CAT_TACO, otherCatCount);
     return deck;
 }
 
@@ -718,36 +762,27 @@ function setupGame() {
         explodingReveal: null,
         nextDrawFromBottom: false,
     };
+    // Build deck for this player count (all non-Exploding cards, including Defuses)
+    let deck = buildBaseDeckForPlayerCount(playerCount);
 
-    // Build deck
-    let deck = mode === 'party' ? createPartyDeck(playerCount) : [...BASE_DECK];
-    deck = deck.filter(c => c.id !== 'exploding' && c.id !== 'defuse');
-
-    // Give each player 1 defuse
-    const defuseCount = Math.min(6, playerCount + 2);
-    for (let i = 0; i < playerCount; i++) {
-        gameState.players.push({
-            hand: [CARD_TYPES.DEFUSE],
-            eliminated: false,
-        });
-    }
-
-    // Deal 7 cards each (minus the defuse = 6 more)
+    // Give each player 1 Defuse from the deck (if available), then deal 6 more cards to reach 7
     const cardsPerPlayer = 7;
     for (let i = 0; i < playerCount; i++) {
+        const defIdx = deck.findIndex(c => c.id === 'defuse');
+        const startingHand = [];
+        if (defIdx >= 0) {
+            startingHand.push(deck.splice(defIdx, 1)[0]);
+        }
+        gameState.players.push({
+            hand: startingHand,
+            eliminated: false,
+        });
         for (let j = 1; j < cardsPerPlayer; j++) {
             if (deck.length > 0) {
                 const idx = Math.floor(Math.random() * deck.length);
                 gameState.players[i].hand.push(deck.splice(idx, 1)[0]);
             }
         }
-    }
-
-    // Add defuses to deck for 4-5 players
-    const defusesForDeck = mode === 'party' ? Math.min(10, defuseCount - playerCount) : (playerCount >= 4 ? 4 : 2);
-    for (let i = 0; i < defusesForDeck && deck.length > 0; i++) {
-        const idx = Math.floor(Math.random() * deck.length);
-        deck.splice(idx, 0, CARD_TYPES.DEFUSE);
     }
 
     // Add exploding kittens (N-1)
@@ -1223,6 +1258,40 @@ function confirmPlay() {
             pendingCards = indicesCopy;
             executeCatCombo(count);
         };
+    } else if (card.id === 'targeted_attack') {
+        // Targeted Attack: pick target first, then Nope flow (target can Nope)
+        const actionIndex = pendingCards[0];
+        indicesToDiscard = [actionIndex];
+        const targets = [];
+        for (let i = 0; i < gameState.playerCount; i++) {
+            if (i !== actingPlayerIndex && !gameState.players[i].eliminated) {
+                targets.push({ index: i, name: gameState.playerNames[i] });
+            }
+        }
+        if (targets.length === 0) {
+            pendingCards = [];
+            renderGame();
+            syncStateIfOnline();
+            return;
+        }
+        const html = targets.map(t => `<button class="btn" data-target="${t.index}">${t.name}</button>`).join('');
+        showModal('Choose player to attack', html, () => {});
+        modalContent.querySelectorAll('button').forEach(btn => {
+            btn.onclick = () => {
+                const targetIdx = parseInt(btn.dataset.target, 10);
+                modalOverlay.classList.add('hidden');
+                cardDescriptor = { name: 'Targeted Attack', emoji: '🎯' };
+                effectFn = () => executeTargetedAttack(actingPlayerIndex, actionIndex, targetIdx);
+                const onCancelled = () => {
+                    discardPlayedCards(actingPlayerIndex, [actionIndex]);
+                    pendingCards = [];
+                    renderGame();
+                    syncStateIfOnline();
+                };
+                handleLocalNope(actingPlayerIndex, cardDescriptor, effectFn, 0, onCancelled);
+            };
+        });
+        return;
     } else {
         const actionIndex = pendingCards[0];
         indicesToDiscard = [actionIndex];
@@ -1315,6 +1384,10 @@ function runPendingEffect(p) {
     } else if (p.effectType === 'attack') {
         gameState.attacksPending = (gameState.attacksPending || 0) + 2;
         advanceTurn();
+    } else if (p.effectType === 'targeted_attack') {
+        const targetIdx = p.targetIndex ?? getNextPlayer(acting);
+        gameState.currentPlayerIndex = targetIdx;
+        gameState.attacksPending = (gameState.attacksPending || 0) + 2;
     } else if (p.effectType === 'see_future') {
         const top3 = gameState.drawPile.slice(0, 3);
         const html = top3.map(c => `<div class="card ${c.cssClass}">${c.emoji} ${c.name}</div>`).join('');
@@ -1501,18 +1574,24 @@ function discardPlayedCards(playerIndex, indices) {
 }
 
 // Local (same-device) Nope resolution: lets any player with a Nope cancel or re-enable an effect.
-// onCancelled (optional): called when effect is cancelled (e.g. to advance turn for cat combos).
-// Used only when we want modal-driven flow without persisting pendingNope (kept for any legacy paths).
-function handleLocalNope(actingPlayerIndex, card, effectFn, parity = 0, onCancelled = null) {
+// Nope can be played on another Nope to negate it (chain continues). nopeCardsPlayed collects all Nope cards
+// so they are added to the discard pile after the action cards (so Nope shows as last played).
+function handleLocalNope(actingPlayerIndex, card, effectFn, parity = 0, onCancelled = null, nopeCardsPlayed = null) {
+    const nopeCards = nopeCardsPlayed || [];
     const nopeHolders = [];
     for (let i = 0; i < gameState.playerCount; i++) {
         if (gameState.players[i].eliminated) continue;
-        if (i === actingPlayerIndex) continue; // acting player cannot Nope their own play
         const hasNope = gameState.players[i].hand.some(c => c.id === 'nope');
         if (hasNope) {
             nopeHolders.push({ index: i, name: gameState.playerNames[i] });
         }
     }
+
+    const flushNopeCardsToDiscard = () => {
+        if (nopeCards.length > 0) {
+            gameState.discardPile.push(...nopeCards);
+        }
+    };
 
     // No one can Nope: resolve immediately or treat as cancelled based on parity
     if (nopeHolders.length === 0) {
@@ -1521,14 +1600,15 @@ function handleLocalNope(actingPlayerIndex, card, effectFn, parity = 0, onCancel
             effectFn();
         } else {
             if (onCancelled) onCancelled();
-            renderGame();
-            syncStateIfOnline();
         }
+        flushNopeCardsToDiscard();
+        renderGame();
+        syncStateIfOnline();
         return;
     }
 
     let html = `<p><strong>${gameState.playerNames[actingPlayerIndex]}</strong> played ${card.emoji || ''} ${card.name}.</p>`;
-    html += '<p>Does anyone want to play a Nope? Each Nope flips whether it takes effect.</p>';
+    html += '<p>Does anyone want to play a Nope? Each Nope flips whether it takes effect. You can Nope a Nope to negate it.</p>';
     html += '<div class="nope-buttons">';
     nopeHolders.forEach(h => {
         html += `<button class="btn" data-nope-player="${h.index}">Play Nope as ${h.name}</button>`;
@@ -1538,7 +1618,7 @@ function handleLocalNope(actingPlayerIndex, card, effectFn, parity = 0, onCancel
 
     showModal('Play Nope?', html, () => {});
 
-    // Someone plays a Nope
+    // Someone plays a Nope (Nope can be chained: another player can Nope that Nope, etc.)
     modalContent.querySelectorAll('[data-nope-player]').forEach(btn => {
         btn.onclick = () => {
             const pIdx = parseInt(btn.dataset.nopePlayer, 10);
@@ -1546,12 +1626,12 @@ function handleLocalNope(actingPlayerIndex, card, effectFn, parity = 0, onCancel
             const nopeIdx = hand.findIndex(c => c.id === 'nope');
             if (nopeIdx >= 0) {
                 const nopeCard = hand.splice(nopeIdx, 1)[0];
-                gameState.discardPile.push(nopeCard);
+                nopeCards.push(nopeCard); // collect; add to discard after action cards so Nope shows as last played
             }
             modalOverlay.classList.add('hidden');
             renderGame();
             syncStateIfOnline();
-            handleLocalNope(actingPlayerIndex, card, effectFn, parity ^ 1, onCancelled);
+            handleLocalNope(actingPlayerIndex, card, effectFn, parity ^ 1, onCancelled, nopeCards);
         };
     });
 
@@ -1564,9 +1644,10 @@ function handleLocalNope(actingPlayerIndex, card, effectFn, parity = 0, onCancel
                 effectFn();
             } else {
                 if (onCancelled) onCancelled();
-                renderGame();
-                syncStateIfOnline();
             }
+            flushNopeCardsToDiscard();
+            renderGame();
+            syncStateIfOnline();
         };
     }
 }
@@ -1644,6 +1725,19 @@ function runAlterFutureFlow() {
     };
 }
 
+function executeTargetedAttack(actingPlayerIndex, cardIndex, targetIdx) {
+    const player = gameState.players[actingPlayerIndex];
+    const card = player.hand[cardIndex];
+    if (!card || card.id !== 'targeted_attack') return;
+    player.hand.splice(cardIndex, 1);
+    gameState.discardPile.push(card);
+    pendingCards = [];
+    gameState.currentPlayerIndex = targetIdx;
+    gameState.attacksPending = (gameState.attacksPending || 0) + 2;
+    renderGame();
+    syncStateIfOnline();
+}
+
 function executeActionCard(index) {
     const player = gameState.players[gameState.currentPlayerIndex];
     const card = player.hand[index];
@@ -1671,6 +1765,33 @@ function executeActionCard(index) {
         advanceTurn();
         renderGame();
         syncStateIfOnline();
+        return;
+    }
+
+    if (card.id === 'targeted_attack') {
+        const targets = [];
+        for (let i = 0; i < gameState.playerCount; i++) {
+            if (i !== gameState.currentPlayerIndex && !gameState.players[i].eliminated) {
+                targets.push({ index: i, name: gameState.playerNames[i] });
+            }
+        }
+        if (targets.length === 0) {
+            renderGame();
+            syncStateIfOnline();
+            return;
+        }
+        const html = targets.map(t => `<button class="btn" data-target="${t.index}">${t.name}</button>`).join('');
+        showModal('Choose player to attack', html, () => {});
+        modalContent.querySelectorAll('button').forEach(btn => {
+            btn.onclick = () => {
+                const targetIdx = parseInt(btn.dataset.target, 10);
+                modalOverlay.classList.add('hidden');
+                gameState.currentPlayerIndex = targetIdx;
+                gameState.attacksPending = (gameState.attacksPending || 0) + 2;
+                renderGame();
+                syncStateIfOnline();
+            };
+        });
         return;
     }
 
