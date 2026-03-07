@@ -591,10 +591,15 @@ async function startGameOnline() {
         explodingReveal: null,
         nextDrawFromBottom: false,
     };
-    let deck = mode === 'party' ? createPartyDeck(playerCount) : [...BASE_DECK];
-    deck = deck.filter(c => c.id !== 'exploding' && c.id !== 'defuse');
+    // Build deck for this player count (all non-Exploding cards, including Defuses)
+    let deck = buildBaseDeckForPlayerCount(playerCount);
     for (let i = 0; i < playerCount; i++) {
-        gameState.players.push({ hand: [CARD_TYPES.DEFUSE], eliminated: false });
+        const defIdx = deck.findIndex(c => c.id === 'defuse');
+        const startingHand = [];
+        if (defIdx >= 0) {
+            startingHand.push(deck.splice(defIdx, 1)[0]);
+        }
+        gameState.players.push({ hand: startingHand, eliminated: false });
     }
     const cardsPerPlayer = 7;
     for (let i = 0; i < playerCount; i++) {
@@ -604,12 +609,6 @@ async function startGameOnline() {
                 gameState.players[i].hand.push(deck.splice(idx, 1)[0]);
             }
         }
-    }
-    const defuseCount = Math.min(6, playerCount + 2);
-    const defusesForDeck = mode === 'party' ? Math.min(10, defuseCount - playerCount) : (playerCount >= 4 ? 4 : 2);
-    for (let i = 0; i < defusesForDeck && deck.length > 0; i++) {
-        const idx = Math.floor(Math.random() * deck.length);
-        deck.splice(idx, 0, CARD_TYPES.DEFUSE);
     }
     const explodingCount = playerCount - 1;
     for (let i = 0; i < explodingCount; i++) deck.push(CARD_TYPES.EXPLODING);
@@ -818,11 +817,15 @@ function setupGameFromState(names, playerCount, mode) {
         explodingReveal: null,
         nextDrawFromBottom: false,
     };
-    let deck = mode === 'party' ? createPartyDeck(playerCount) : [...BASE_DECK];
-    deck = deck.filter(c => c.id !== 'exploding' && c.id !== 'defuse');
-    const defuseCount = Math.min(6, playerCount + 2);
+    // Build deck for this player count (all non-Exploding cards, including Defuses)
+    let deck = buildBaseDeckForPlayerCount(playerCount);
     for (let i = 0; i < playerCount; i++) {
-        gameState.players.push({ hand: [CARD_TYPES.DEFUSE], eliminated: false });
+        const defIdx = deck.findIndex(c => c.id === 'defuse');
+        const startingHand = [];
+        if (defIdx >= 0) {
+            startingHand.push(deck.splice(defIdx, 1)[0]);
+        }
+        gameState.players.push({ hand: startingHand, eliminated: false });
     }
     const cardsPerPlayer = 7;
     for (let i = 0; i < playerCount; i++) {
@@ -832,11 +835,6 @@ function setupGameFromState(names, playerCount, mode) {
                 gameState.players[i].hand.push(deck.splice(idx, 1)[0]);
             }
         }
-    }
-    const defusesForDeck = mode === 'party' ? Math.min(10, defuseCount - playerCount) : (playerCount >= 4 ? 4 : 2);
-    for (let i = 0; i < defusesForDeck && deck.length > 0; i++) {
-        const idx = Math.floor(Math.random() * deck.length);
-        deck.splice(idx, 0, CARD_TYPES.DEFUSE);
     }
     const explodingCount = playerCount - 1;
     for (let i = 0; i < explodingCount; i++) deck.push(CARD_TYPES.EXPLODING);
