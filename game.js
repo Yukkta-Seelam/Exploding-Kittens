@@ -743,7 +743,7 @@ function showFavorTargetPicker(actingPlayerIndex, targetIdx, onComplete) {
 // Setup game
 function setupGame() {
     const playerCount = parseInt(playerCountSelect.value, 10);
-    const mode = gameModeSelect.value;
+    const mode = 'base';
     const names = Array.from(playerNamesDiv.querySelectorAll('input')).map(i => i.value.trim() || 'Player');
 
     gameState = {
