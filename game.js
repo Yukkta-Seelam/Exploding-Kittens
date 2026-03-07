@@ -1192,11 +1192,7 @@ function confirmPlay() {
     if (cards.length === 0) return;
 
     const card = cards[0];
-    const onCancelled = () => {
-        pendingCards = [];
-        renderGame();
-        syncStateIfOnline();
-    };
+    let indicesToDiscard = []; // when Nope cancels, we still discard these cards
 
     // All plays (except Defuse, which is never played from hand this way) can be Nope'd. Run Nope flow first, then execute.
     if (isOnline) {
@@ -1218,6 +1214,7 @@ function confirmPlay() {
         const h = gameState.players[actingPlayerIndex]?.hand || [];
         const count = isPendingFiveDifferent(h) ? 5 : isPendingThreeSame(h) ? 3 : 2;
         const indicesCopy = [...pendingCards].sort((a, b) => a - b).reverse().slice(0, count);
+        indicesToDiscard = indicesCopy;
         cardDescriptor = {
             name: count === 2 ? '2 Same Cats' : count === 3 ? '3 Same Cats' : '5 Different Cards',
             emoji: '🐱',
@@ -1228,9 +1225,17 @@ function confirmPlay() {
         };
     } else {
         const actionIndex = pendingCards[0];
+        indicesToDiscard = [actionIndex];
         cardDescriptor = hand[actionIndex];
         effectFn = () => executeActionCard(actionIndex);
     }
+
+    const onCancelled = () => {
+        discardPlayedCards(actingPlayerIndex, indicesToDiscard);
+        pendingCards = [];
+        renderGame();
+        syncStateIfOnline();
+    };
 
     handleLocalNope(actingPlayerIndex, cardDescriptor, effectFn, 0, onCancelled);
 }
@@ -1480,6 +1485,19 @@ function showNopeModalFromState() {
     });
     const passBtn = document.getElementById('nope-pass');
     if (passBtn) passBtn.onclick = () => { modalOverlay.classList.add('hidden'); resolvePendingNope(); };
+}
+
+// When Nope cancels an action, the played cards still go to the discard pile (action has no effect but cards are lost).
+function discardPlayedCards(playerIndex, indices) {
+    const hand = gameState.players[playerIndex]?.hand;
+    if (!hand) return;
+    const sorted = [...indices].sort((a, b) => b - a);
+    sorted.forEach(idx => {
+        if (idx >= 0 && idx < hand.length) {
+            const c = hand.splice(idx, 1)[0];
+            if (c) gameState.discardPile.push(c);
+        }
+    });
 }
 
 // Local (same-device) Nope resolution: lets any player with a Nope cancel or re-enable an effect.
