@@ -601,7 +601,7 @@ async function startGameOnline() {
         }
         gameState.players.push({ hand: startingHand, eliminated: false });
     }
-    const cardsPerPlayer = 7;
+    const cardsPerPlayer = 8;
     for (let i = 0; i < playerCount; i++) {
         for (let j = 1; j < cardsPerPlayer; j++) {
             if (deck.length > 0) {
@@ -764,8 +764,8 @@ function setupGame() {
     // Build deck for this player count (all non-Exploding cards, including Defuses)
     let deck = buildBaseDeckForPlayerCount(playerCount);
 
-    // Give each player 1 Defuse from the deck (if available), then deal 6 more cards to reach 7
-    const cardsPerPlayer = 7;
+    // Give each player 1 Defuse from the deck (if available), then deal 7 more cards (hand size = 8)
+    const cardsPerPlayer = 8;
     for (let i = 0; i < playerCount; i++) {
         const defIdx = deck.findIndex(c => c.id === 'defuse');
         const startingHand = [];
@@ -827,7 +827,7 @@ function setupGameFromState(names, playerCount, mode) {
         }
         gameState.players.push({ hand: startingHand, eliminated: false });
     }
-    const cardsPerPlayer = 7;
+    const cardsPerPlayer = 8;
     for (let i = 0; i < playerCount; i++) {
         for (let j = 1; j < cardsPerPlayer; j++) {
             if (deck.length > 0) {
